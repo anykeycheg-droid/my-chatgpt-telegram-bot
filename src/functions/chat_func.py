@@ -4,7 +4,6 @@ import logging
 from typing import List, Tuple
 
 import openai
-from openai import APIConnectionError  # Правильный импорт для 0.28.1
 from telethon.events import NewMessage
 
 from src.utils import LOG_PATH, model, max_token, sys_mess, read_existing_conversation, num_tokens_from_messages
@@ -60,11 +59,7 @@ def get_openai_response(prompt: Prompt, filename: str) -> str:
             left = max_token - used
             return f"{text}\n\n__({left} токенов осталось)__"
             
-        except APIConnectionError:
-            trial += 1
-            if trial >= 5:
-                return "🔌 Проблемы с соединением... Попробуй через минуту"
-        except Exception as e:
+            except Exception as e:
             logging.error(f"OpenAI error: {e}")
             trial += 1
             if trial >= 5:
