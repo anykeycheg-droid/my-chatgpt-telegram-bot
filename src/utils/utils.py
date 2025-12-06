@@ -95,14 +95,19 @@ RANDOM_ACTION = [
     SendMessageChooseStickerAction(),
     SendMessageChooseContactAction(),
 ]
-ALLOW_USERS = eval(os.getenv("ALLOW_USERS"))
+ALLOW_USERS = eval(os.getenv("ALLOW_USERS", "[]"))  # ← добавил защиту от None
 
-MODEL_DICT = {
-    "gpt-4k": ("gpt-3.5-turbo-1106", 4096),
-    "gpt-16k": ("gpt-3.5-turbo-16k", 16000),
-}
-model = MODEL_DICT["gpt-4k"][0]
-max_token = MODEL_DICT["gpt-4k"][1]
+# Модели больше не нужны через словарь — используем напрямую лучшую 2025 года
+model = "o4-mini"          # ← Самая выгодная мультимодальная модель декабря 2025
+max_token = 128000          # ← Контекст 128k токенов (огромный!)
+
+# Удаляем или комментируем старый блок:
+# MODEL_DICT = {
+#     "gpt-4k": ("gpt-3.5-turbo-1106", 4096),
+#     "gpt-16k": ("gpt-3.5-turbo-16k", 16000),
+# }
+# model = MODEL_DICT["gpt-4k"][0]
+# max_token = MODEL_DICT["gpt-4k"][1]
 
 
 def initialize_logging() -> io.StringIO:
