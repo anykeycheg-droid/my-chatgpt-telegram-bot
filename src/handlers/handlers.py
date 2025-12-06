@@ -8,7 +8,8 @@ from src.functions.additional_func import (
     analyze_image_with_gpt,
 )
 from src.functions.chat_func import process_and_send_mess, start_and_check, get_openai_response
-from src.utils import RANDOM_ACTION, ALLOW_USERS, get_date_time
+from src.utils import ALLOW_USERS, get_date_time
+
 
 
 create_initial_folders()
@@ -89,17 +90,7 @@ async def universal_handler(event):
 
         # Отправляем ответ (с разбиением на части и т.п.)
         await process_and_send_mess(event, response)
-
-        # Немного "случайной" активности, чтобы выглядеть живее
-        for _ in range(random.randint(2, 5)):
-            await asyncio.sleep(random.uniform(1.5, 3.5))
-            await event.client(
-                SetTypingRequest(
-                    peer=event.chat_id,
-                    action=random.choice(RANDOM_ACTION),
-                )
-            )
-
+     
     except Exception as e:
         logging.error(f"Ошибка в universal_handler: {e}")
         await event.reply("Ой, что-то сломалось… Попробуй ещё разок")
