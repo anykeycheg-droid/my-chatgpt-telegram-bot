@@ -41,29 +41,36 @@ async def start_and_check(event: NewMessage, message: str, chat_id: int) -> Tupl
 
 def get_openai_response(prompt: Prompt, filename: str) -> str:
     trial = 0
+
     while trial < 5:
         try:
             completion = openai.ChatCompletion.create(
-                model=model,  # gpt-4o-mini
+                model=model,
                 messages=prompt,
-                max_tokens=1500,  # Для gpt-4o-mini
-                temperature=0.8,  # Работает
+                max_tokens=1500,
+                temperature=0.8,
             )
+
             text = completion.choices[0].message.content.strip()
             prompt.append(completion.choices[0].message)
-            
+
             with open(filename, "w", encoding="utf-8") as f:
                 json.dump({"messages": prompt}, f, ensure_ascii=False, indent=4)
-            
+
             used = completion.usage.total_tokens
             left = max_token - used
+
             return f"{text}\n\n__({left} токенов осталось)__"
-            
-            except Exception as e:
-            logging.error(f"OpenAI error: {e}")
+
+        except Exception as e:
             trial += 1
+            logging.error(f"OpenAI error ({trial}/5): {e}")
+
             if trial >= 5:
-                return "Ой, OpenAI сейчас подтормаживает... Попробуй ещё раз через минуту 😏"
+                return "⚠ OpenAI сейчас недоступен. Попробуй ещё раз через минуту."
+
+            time.sleep(2)
+
 
 async def process_and_send_mess(event, text: str, limit=500) -> None:
     from src.utils import split_text
