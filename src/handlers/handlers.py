@@ -8,7 +8,7 @@ from src.functions.additional_func import (
     analyze_image_with_gpt,
 )
 from src.functions.chat_func import process_and_send_mess, start_and_check, get_openai_response
-from src.utils import ALLOW_USERS, get_date_time
+from src.utils import get_date_time
 
 
 
@@ -20,11 +20,7 @@ async def universal_handler(event):
     if event.out:
         return
 
-    # Ограничение по ALLOW_USERS, если задан
-    if ALLOW_USERS and event.chat_id not in ALLOW_USERS:
-        return
-
-    # ==== 1. Если прилетело медиа (фото, документ и т.п.) ====
+        # ==== 1. Если прилетело медиа (фото, документ и т.п.) ====
     if getattr(event.message, "media", None):
         try:
             # Скачиваем байты файла
