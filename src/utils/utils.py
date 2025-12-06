@@ -27,3 +27,6 @@ def get_date_time(zone: str | None = None) -> str:
     except Exception:
         timezone = pytz.timezone("Europe/Moscow")
     return datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S %Z")
+
+
+BOT_NAME = "Dushnilla"
