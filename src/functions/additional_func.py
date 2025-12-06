@@ -6,7 +6,7 @@ import base64
 
 import openai
 from duckduckgo_search import DDGS  # ← ФИКС: DDGS вместо ddg (для v6.3.2+)
-from src.utils import LOG_PATH, VIETNAMESE_WORDS, num_tokens_from_messages, read_existing_conversation
+from src.utils import LOG_PATH, num_tokens_from_messages, read_existing_conversation
 from telethon.events import NewMessage
 from unidecode import unidecode
 
