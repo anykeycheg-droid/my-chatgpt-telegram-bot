@@ -13,7 +13,6 @@ from dotenv import load_dotenv
 from telethon.errors.rpcerrorlist import PeerIdInvalidError
 from telethon.events import NewMessage
 from telethon.tl.types import (
-    Chat,
     SendMessageChooseContactAction,
     SendMessageChooseStickerAction,
     SendMessageGamePlayAction,
@@ -21,7 +20,6 @@ from telethon.tl.types import (
     SendMessageRecordAudioAction,
     SendMessageRecordRoundAction,
     SendMessageRecordVideoAction,
-    User,
 )
 
 load_dotenv()
@@ -29,29 +27,30 @@ load_dotenv()
 # Prompt typehint
 Prompt = List[dict]
 
-# Bot name
-BOT_NAME = "Minnion"
+# Имя бота
+BOT_NAME = "Душнилла"
 
-# Системный промпт — заставляем бота говорить только на русском и быть Душниллой
+# Главный промпт — Душнилла на русском (мультимодальный)
 SYS_MESS = [
     {
         "role": "system",
         "content": """
 Ты — очень умный, слегка ироничный и заботливый помощник по имени Душнилла.
-Всегда отвечай ТОЛЬКО на русском языке, даже если вопрос на английском или другом языке.
+Всегда отвечай ТОЛЬКО на русском языке, даже если вопрос на другом языке.
 Говори живо, по-дружески, можешь использовать эмодзи, но не переборщи.
 Если тебя зовут по имени — отвечай сразу, без лишних слов.
 Ты любишь подушнить, но с теплом и заботой.
-Никогда не пиши, что ты ИИ. Просто помогай.
+Можешь анализировать изображения: описывай их подробно, если пользователь присылает фото.
+Никогда не пиши, что ты ИИ или что у тебя нет доступа к чему-то. Просто помогай.
         """.strip()
     }
 ]
 
-# Это теперь основной промпт
+# Основной промпт для всех чатов
 sys_mess = SYS_MESS
 
-VIETNAMESE_WORDS = "áàảãạăắằẳẵặâấầẩẫậÁÀẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬéèẻẽẹêếềểễệÉÈẺẼẸÊẾỀỂỄỆóòỏõọôốồổỗộơớờởỡợÓÒỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢíìỉĩịÍÌỈĨỊúùủũụưứừửữựÚÙỦŨỤƯỨỪỬỮỰýỳỷỹỵÝỲỶỸỴđĐ"
 LOG_PATH = "logs/"
+
 RANDOM_ACTION = [
     SendMessageRecordVideoAction(),
     SendMessageRecordRoundAction(),
@@ -61,149 +60,87 @@ RANDOM_ACTION = [
     SendMessageChooseStickerAction(),
     SendMessageChooseContactAction(),
 ]
-ALLOW_USERS = eval(os.getenv("ALLOW_USERS", "[]"))  # ← добавил защиту от None
 
-# Модели больше не нужны через словарь — используем напрямую лучшую 2025 года
-model = "o4-mini"          # ← Самая выгодная мультимодальная модель декабря 2025
-max_token = 128000          # ← Контекст 128k токенов (огромный!)
+# Доступ — только для указанных ID (если пусто — всем)
+ALLOW_USERS = eval(os.getenv("ALLOW_USERS", "[]"))
 
-# Удаляем или комментируем старый блок:
-# MODEL_DICT = {
-#     "gpt-4k": ("gpt-3.5-turbo-1106", 4096),
-#     "gpt-16k": ("gpt-3.5-turbo-16k", 16000),
-# }
-# model = MODEL_DICT["gpt-4k"][0]
-# max_token = MODEL_DICT["gpt-4k"][1]
-
+# Самая мощная и дешёвая мультимодальная модель декабря 2025
+model = "o4-mini"
+max_token = 128000
 
 def initialize_logging() -> io.StringIO:
     coloredlogs.install()
     logging.getLogger("uvicorn.access").setLevel(logging.DEBUG)
-    # Create a StringIO object to capture log messages sent to the console
     console_out = io.StringIO()
-
-    # Get app handler from root logger
     console_handler = logging.getLogger("root").handlers[0]
-
-    # Set the stream of the console handler to the StringIO object
     console_handler.stream = console_out
-
     return console_out
 
-
 def create_initial_folders() -> None:
-    if not os.path.exists(f"{LOG_PATH}chats"):
-        os.mkdir(f"{LOG_PATH}chats")
-    if not os.path.exists(f"{LOG_PATH}chats/history"):
-        os.mkdir(f"{LOG_PATH}chats/history")
-    if not os.path.exists(f"{LOG_PATH}chats/session"):
-        os.mkdir(f"{LOG_PATH}chats/session")
+    for folder in [f"{LOG_PATH}chats", f"{LOG_PATH}chats/history", f"{LOG_PATH}chats/session"]:
+        os.makedirs(folder, exist_ok=True)
 
-
-def get_date_time(zone):
-    # Set the timezone to Vietnam Standard Time (UTC+7)
+def get_date_time(zone="Asia/Ho_Chi_Minh"):
     timezone = pytz.timezone(zone)
-    # Get the current time in Vietnam
-    time = datetime.now(timezone)
-    # Format the time as a string (optional)
-    time_str = time.strftime("%Y-%m-%d %H:%M:%S %Z%z")
-    return time_str
+    return datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S %Z")
 
-
-async def check_chat_type(event: NewMessage):
-    client = event.client
-    chat_id = event.chat_id
-    entity = await client.get_entity(chat_id)
+async def read_existing_conversation(chat_id: int) -> Tuple[int, str, Prompt]:
     try:
-        if type(entity) == User:
-            message = event.raw_text
-            return "User", client, chat_id, message
-        elif type(entity) == Chat:
-            try:
-                message = event.raw_text.split(" ", maxsplit=1)[1]
-            except:
-                message = "This is such stupid codes"
-            return "Group", client, chat_id, message
-    except PeerIdInvalidError:
-        logging.error("Invalid chat ID")
-    except Exception as e:
-        logging.error(f"Error occurred when checking chat type: {e}")
-
-
-async def read_existing_conversation(chat_id: int) -> Tuple[int, int, str, Prompt]:
-    try:
-        with open(f"{LOG_PATH}chats/session/{chat_id}.json", "r") as f:
+        with open(f"{LOG_PATH}chats/session/{chat_id}.json", "r", encoding="utf-8") as f:
             file_num = json.load(f)["session"]
-        filename = f"{LOG_PATH}chats/history/{chat_id}_{file_num}.json"
-        # Create .json file in case of new chat
-        if not os.path.exists(filename):
-            data = {"messages": sys_mess}
-            with open(filename, "w") as f:
-                json.dump(data, f, indent=4)
-        # Load existing chats
-        with open(filename, "r") as f:
-            data = json.load(f)
-        prompt = []
-        for item in data["messages"]:
-            prompt.append(item)
-        logging.debug(f"Successfully read conversation {filename}")
-    except Exception as e:
-        logging.error(f"Error occurred: {e}")
+    except:
+        file_num = 1
+        os.makedirs(f"{LOG_PATH}chats/session", exist_ok=True)
+        with open(f"{LOG_PATH}chats/session/{chat_id}.json", "w", encoding="utf-8") as f:
+            json.dump({"session": 1}, f)
+
+    filename = f"{LOG_PATH}chats/history/{chat_id}_{file_num}.json"
+    if not os.path.exists(filename):
+        with open(filename, "w", encoding="utf-8") as f:
+            json.dump({"messages": sys_mess}, f, ensure_ascii=False, indent=4)
+
+    with open(filename, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    prompt = data.get("messages", sys_mess)
     return file_num, filename, prompt
 
-
-def num_tokens_from_messages(
-    messages: Prompt, model: Optional[str] = "gpt-3.5-turbo"
-) -> int:
-    """Returns the number of tokens used by a list of messages."""
+def num_tokens_from_messages(messages: Prompt, model: str = "o4-mini") -> int:
+    """Обновлённая версия для o4-mini (декабрь 2025)"""
     try:
         encoding = tiktoken.encoding_for_model(model)
     except KeyError:
+        # Fallback для новых моделей o-серии
         encoding = tiktoken.get_encoding("cl100k_base")
-    if model == "gpt-3.5-turbo":  # note: future models may deviate from this
-        num_tokens = 0
-        for message in messages:
-            # every message follows <im_start>{role/name}\n{content}<im_end>\n
-            num_tokens += 4
-            for key, value in message.items():
-                num_tokens += len(encoding.encode(value))
-                if key == "name":  # if there's a name, the role is omitted
-                    num_tokens += -1  # role is always required and always 1 token
-        num_tokens += 2  # every reply is primed with <im_start>assistant
-        return num_tokens
-    else:
-        raise NotImplementedError(
-            f"""num_tokens_from_messages() is not presently implemented for model {model}."""
-        )
+    
+    tokens = 0
+    for msg in messages:
+        tokens += 4  # Базовые токены на сообщение
+        for key, value in msg.items():
+            if isinstance(value, str):
+                tokens += len(encoding.encode(value))
+            elif isinstance(value, list):  # Для изображений в мультимодале
+                tokens += sum(len(encoding.encode(str(item))) for item in value if isinstance(item, dict))
+            if key == "name":
+                tokens -= 1
+    tokens += 3  # Финальные токены
+    return tokens
 
-
-def split_text(
-    text: str,
-    limit=500,
-    prefix: str = "",
-    sulfix: str = "",
-    split_at=(r"\n", r"\s", "."),
-) -> Generator[str, None, None]:
-    split_at = tuple(map(re.compile, split_at))
-    while True:
-        if len(text) <= limit:
-            break
-        for split in split_at:
-            for i in reversed(range(limit)):
-                m = split.match(text, pos=i)
-                if m:
-                    cur_text, new_text = text[: m.end()], text[m.end() :]
-                    yield f"{prefix}{cur_text}{sulfix}"
-                    text = new_text
-                    break
-            else:
-                continue
-            break
+def split_text(text: str, limit=4000, prefix="", suffix="") -> Generator[str, None, None]:
+    if len(text) <= limit:
+        yield f"{prefix}{text}{suffix}"
+        return
+    parts = re.split(r'(\n\n|\.\s|\?\s|\!\s)', text)
+    current = ""
+    for part in parts:
+        if len(current) + len(part) < limit:
+            current += part
         else:
-            # Can't find where to split, just return the remaining text and entities
-            break
-    yield f"{prefix}{text}{sulfix}"
-
+            if current.strip():
+                yield f"{prefix}{current.strip()}{suffix}"
+            current = part
+    if current.strip():
+        yield f"{prefix}{current.strip()}{suffix}"
 
 def terminal_html() -> str:
     return """
