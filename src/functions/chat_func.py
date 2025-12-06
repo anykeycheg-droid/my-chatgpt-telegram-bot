@@ -45,9 +45,9 @@ def get_openai_response(prompt: Prompt, filename: str) -> str:
     while trial < 5:
         try:
             completion = openai.ChatCompletion.create(
-                model=model,  # o4-mini (работает в 0.28.1 через fallback)
+                model=model,  # o4-mini
                 messages=prompt,
-                max_tokens=1500,
+                max_completion_tokens=1500,  # ← ФИКС: для o4-mini (не max_tokens!)
                 temperature=0.8,
             )
             text = completion.choices[0].message.content.strip()
@@ -66,7 +66,9 @@ def get_openai_response(prompt: Prompt, filename: str) -> str:
                 return "🔌 Проблемы с соединением... Попробуй через минуту"
         except Exception as e:
             logging.error(f"OpenAI error: {e}")
-            return "Ой, OpenAI сейчас подтормаживает... Попробуй ещё раз через минуту 😏"
+            trial += 1
+            if trial >= 5:
+                return "Ой, OpenAI сейчас подтормаживает... Попробуй ещё раз через минуту 😏"
 
 async def process_and_send_mess(event, text: str, limit=500) -> None:
     from src.utils import split_text  # Импорт внутри, чтобы избежать циклических
