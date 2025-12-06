@@ -6,7 +6,13 @@ from typing import List, Tuple
 import openai
 from telethon.events import NewMessage
 
-from src.utils import LOG_PATH, model, max_token, sys_mess, read_existing_conversation, num_tokens_from_messages
+from src.utils import LOG_PATH
+
+# ---- CHAT SETTINGS ----
+model = "gpt-4o-mini"
+max_token = 16000
+sys_mess = "Ты полезный и краткий ассистент."
+
 
 Prompt = List[dict]
 
