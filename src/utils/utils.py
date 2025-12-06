@@ -50,7 +50,7 @@ SYS_MESS = [
 sys_mess = SYS_MESS
 
 # Для совместимости со старым кодом (не удаляй!)
-VIETNAMESE_WORDS = "áàảãạăắằẳẵặâấầẩẫậÁÀẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬéèẻẽẹêếềểễệÉÈẺẼẸÊẾỀỂỄỆóòỏõọôốồổỗộơớờởỡợÓÒỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢíìỉĩịÍÌỈĨỊúùủũụưứừửữựÚÙỦŨỤƯỨỪỬỮỰýỳỷỹỵÝỲỶỸỴđĐ"
+VIETNAMESE_WORDS = "áàảãạăắằẳẵặâấầẩẫậÁÀẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬéèẻẽẹêếềểễệÉÈẺẼẸÊẾỀỂỄỆóòỏõọôốồổỗộơớờởỡợÓÒỎÕỌÔỐỒỔÖÕƠỚỜỞỠỢíìỉĩịÍÌỈĨỊúùủũụưứừửữựÚÙỦŨỤƯỨỪỬỮỰýỳỷỹỵÝỲỶỸỴđĐ"
 
 LOG_PATH = "logs/"
 
@@ -109,16 +109,14 @@ async def read_existing_conversation(chat_id: int) -> Tuple[int, str, Prompt]:
     return file_num, filename, prompt
 
 def num_tokens_from_messages(messages: Prompt, model: str = "o4-mini") -> int:
-    """Обновлённая версия для o4-mini (декабрь 2025)"""
     try:
         encoding = tiktoken.encoding_for_model(model)
     except KeyError:
-        # Fallback для новых моделей o-серии
         encoding = tiktoken.get_encoding("cl100k_base")
     
     tokens = 0
     for msg in messages:
-        tokens += 4  # Базовые токены на сообщение
+        tokens += 4
         for key, value in msg.items():
             if isinstance(value, str):
                 tokens += len(encoding.encode(value))
@@ -126,7 +124,7 @@ def num_tokens_from_messages(messages: Prompt, model: str = "o4-mini") -> int:
                 tokens += sum(len(encoding.encode(str(item))) for item in value if isinstance(item, dict))
             if key == "name":
                 tokens -= 1
-    tokens += 3  # Финальные токены
+    tokens += 3
     return tokens
 
 def split_text(text: str, limit=4000, prefix="", suffix="") -> Generator[str, None, None]:
