@@ -50,7 +50,7 @@ SYS_MESS = [
 sys_mess = SYS_MESS
 
 # Для совместимости со старым кодом (не удаляй!)
-VIETNAMESE_WORDS = "áàảãạăắằẳẵặâấầẩẫậÁÀẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬéèẻẽẹêếềểễệÉÈẺẼẸÊẾỀỂỄỆóòỏõọôốồổỗộơớờởỡợÓÒỎÕỌÔỐỒỔÖÕƠỚỜỞỠỢíìỉĩịÍÌỈĨỊúùủũụưứừửữựÚÙỦŨỤƯỨỪỬỮỰýỳỷỹỵÝỲỶỸỴđĐ"
+VIETNAMESE_WORDS = "áàảãạăắằẳẵặâấầẩẫậÁÀẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬéèẻẽẹêếềểễệÉÈẺẼẸÊẾỀỂỄỆóòỏõọôốồổỗộơớờởỡợÓÒỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢíìỉĩịÍÌỈĨỊúùủũụưứừửữựÚÙỦŨỤƯỨỪỬỮỰýỳỷỹỵÝỲỶỸỴđĐ"
 
 LOG_PATH = "logs/"
 
@@ -67,8 +67,8 @@ RANDOM_ACTION = [
 # Доступ — только для указанных ID (если пусто — всем)
 ALLOW_USERS = eval(os.getenv("ALLOW_USERS", "[]"))
 
-# Самая мощная и дешёвая мультимодальная модель декабря 2025
-model = "o4-mini"
+# Самая мощная и дешёвая мультимодальная модель (gpt-4o-mini — точно работает с фото/голосом)
+model = "gpt-4o-mini"
 max_token = 128000
 
 def initialize_logging() -> io.StringIO:
@@ -108,7 +108,8 @@ async def read_existing_conversation(chat_id: int) -> Tuple[int, str, Prompt]:
     prompt = data.get("messages", sys_mess)
     return file_num, filename, prompt
 
-def num_tokens_from_messages(messages: Prompt, model: str = "o4-mini") -> int:
+def num_tokens_from_messages(messages: Prompt, model: str = "gpt-4o-mini") -> int:
+    """Обновлённая версия для gpt-4o-mini"""
     try:
         encoding = tiktoken.encoding_for_model(model)
     except KeyError:
@@ -120,7 +121,7 @@ def num_tokens_from_messages(messages: Prompt, model: str = "o4-mini") -> int:
         for key, value in msg.items():
             if isinstance(value, str):
                 tokens += len(encoding.encode(value))
-            elif isinstance(value, list):  # Для изображений в мультимодале
+            elif isinstance(value, list):  # Для изображений
                 tokens += sum(len(encoding.encode(str(item))) for item in value if isinstance(item, dict))
             if key == "name":
                 tokens -= 1
