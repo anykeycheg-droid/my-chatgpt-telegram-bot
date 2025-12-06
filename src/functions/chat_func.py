@@ -1,26 +1,31 @@
 import asyncio
 import json
 import logging
+import base64
+import os
 from typing import List, Tuple
 
-import openai
-from openai.error import APIConnectionError
+from openai import OpenAI  # Новый импорт для v1+
+from openai import OpenAIError  # Обновлённая ошибка
 from telethon.events import NewMessage
 
 from src.utils import LOG_PATH, model, max_token, sys_mess, read_existing_conversation, num_tokens_from_messages
 
 Prompt = List[dict]
 
+# Клиент OpenAI (для v1.35.8+)
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
 async def over_token(num_tokens: int, event: NewMessage, prompt: Prompt, filename: str):
     await event.reply(f"Разговор слишком длинный ({num_tokens} токенов), начинаю новый! 😅")
     prompt.append({"role": "user", "content": "Кратко перескажи весь предыдущий разговор"})
     try:
-        completion = openai.ChatCompletion.create(model=model, messages=prompt[:10])
-        summary = completion.choices[0].message.content
+        resp = client.chat.completions.create(model=model, messages=prompt[:10])
+        summary = resp.choices[0].message.content
         new_prompt = sys_mess + [{"role": "system", "content": f"Краткое резюме прошлой беседы: {summary}"}]
         with open(filename, "w", encoding="utf-8") as f:
             json.dump({"messages": new_prompt}, f, ensure_ascii=False, indent=4)
-    except Exception as e:
+    except OpenAIError as e:
         logging.error(f"Ошибка суммаризации: {e}")
 
 async def start_and_check(event: NewMessage, message: str, chat_id: int) -> Tuple[str, Prompt]:
@@ -44,34 +49,29 @@ def get_openai_response(prompt: Prompt, filename: str) -> str:
     trial = 0
     while trial < 5:
         try:
-            completion = openai.ChatCompletion.create(
+            resp = client.chat.completions.create(
                 model=model,  # o4-mini
                 messages=prompt,
-                max_completion_tokens=1500,  # Для o4-mini (декабрь 2025)
-                # temperature=0.8,  # ← УБРАНО: не поддерживается в o4-mini (только default 1.0)
+                max_completion_tokens=1500,  # Для o4-mini
             )
-            text = completion.choices[0].message.content.strip()
-            prompt.append(completion.choices[0].message)  # Добавляем ответ в историю
+            text = resp.choices[0].message.content.strip()
+            prompt.append({"role": "assistant", "content": text})
             
             with open(filename, "w", encoding="utf-8") as f:
                 json.dump({"messages": prompt}, f, ensure_ascii=False, indent=4)
             
-            used = completion.usage.total_tokens
+            used = resp.usage.total_tokens if resp.usage else 0
             left = max_token - used
             return f"{text}\n\n__({left} токенов осталось)__"
             
-        except APIConnectionError:
-            trial += 1
-            if trial >= 5:
-                return "🔌 Проблемы с соединением... Попробуй через минуту"
-        except Exception as e:
+        except OpenAIError as e:
             logging.error(f"OpenAI error: {e}")
             trial += 1
             if trial >= 5:
                 return "Ой, OpenAI сейчас подтормаживает... Попробуй ещё раз через минуту 😏"
 
 async def process_and_send_mess(event, text: str, limit=500) -> None:
-    from src.utils import split_text  # Импорт внутри, чтобы избежать циклических
+    from src.utils import split_text
     text_lst = text.split("```")
     cur_limit = 4096
     for idx, part in enumerate(text_lst):
