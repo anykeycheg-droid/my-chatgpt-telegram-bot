@@ -30,3 +30,6 @@ def get_date_time(zone: str | None = None) -> str:
 
 
 BOT_NAME = "Dushnilla"
+
+def initialize_logging():
+    pass
