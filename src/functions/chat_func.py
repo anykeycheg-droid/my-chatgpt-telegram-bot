@@ -47,8 +47,8 @@ def get_openai_response(prompt: Prompt, filename: str) -> str:
             completion = openai.ChatCompletion.create(
                 model=model,  # o4-mini
                 messages=prompt,
-                max_completion_tokens=1500,  # ← ОКОНЧАТЕЛЬНЫЙ ФИКС: для o4-mini (декабрь 2025)
-                temperature=0.8,
+                max_completion_tokens=1500,  # Для o4-mini (декабрь 2025)
+                # temperature=0.8,  # ← УБРАНО: не поддерживается в o4-mini (только default 1.0)
             )
             text = completion.choices[0].message.content.strip()
             prompt.append(completion.choices[0].message)  # Добавляем ответ в историю
