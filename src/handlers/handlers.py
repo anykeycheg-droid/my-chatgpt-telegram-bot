@@ -8,7 +8,7 @@ from src.functions.additional_func import (
     analyze_image_with_gpt,
 )
 from src.functions.chat_func import process_and_send_mess, start_and_check, get_openai_response
-from src.utils import get_date_time
+from src.utils import get_date_time, create_initial_folders
 
 
 
