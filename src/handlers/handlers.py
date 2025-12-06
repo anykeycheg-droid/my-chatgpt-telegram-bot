@@ -1,51 +1,135 @@
 import os
 import logging
 from telethon import events
-from src.utils.utils import LOG_PATH, create_initial_folders, get_date_time
-from src.bot.bot import ALLOW_USERS
+from src.functions.additional_func import (
+    bash,
+    search,
+    generate_image,
+    analyze_image_with_gpt,
+)
+from src.functions.chat_func import process_and_send_mess, start_and_check, get_openai_response
+from src.utils import RANDOM_ACTION, ALLOW_USERS, get_date_time
+
 
 create_initial_folders()
 
 @events.register(events.NewMessage)
 async def universal_handler(event):
+    # Не реагируем на свои сообщения
     if event.out:
         return
 
+    # Ограничение по ALLOW_USERS, если задан
     if ALLOW_USERS and event.chat_id not in ALLOW_USERS:
         return
 
-    # ==== ОБРАБОТКА МЕДИА ====
+    # ==== 1. Если прилетело медиа (фото, документ и т.п.) ====
     if getattr(event.message, "media", None):
         try:
-            media_folder = f"{LOG_PATH}media"
-            os.makedirs(media_folder, exist_ok=True)
+            # Скачиваем байты файла
+            media_bytes = await event.client.download_media(event.message, file=bytes)
 
-            path = await event.client.download_media(
-                event.message,
-                file=f"{media_folder}/{event.id}"
-            )
+            if media_bytes:
+                # Отзеркалить файл обратно в чат (чтобы было видно, что дошло)
+                await event.client.send_file(
+                    event.chat_id,
+                    media_bytes,
+                    caption="✅ Файл принят, думаю над ним...",
+                )
 
-            if path:
-                await event.client.send_file(event.chat_id, path, caption="✅ Файл принят")
+                caption = (event.message.message or "").strip()
+                answer = await analyze_image_with_gpt(media_bytes, caption or None)
+                await event.reply(answer)
             else:
-                bio = await event.client.download_media(event.message, file=bytes)
-                await event.client.send_file(event.chat_id, bio, caption="✅ Файл принят")
+                await event.reply("Я получил файл, но не смог его скачать 😔")
 
-            raise events.StopPropagation
+        except Exception as e:
+            logging.exception("Ошибка при обработке media в universal_handler")
+            await event.reply("Не получилось обработать файл 😔")
 
-        except Exception:
-            logging.exception("Ошибка при обработке медиа")
-            await event.reply("❌ Ошибка при работе с изображением")
-            raise events.StopPropagation
+        raise events.StopPropagation
 
-
-    # ==== ОБРАБОТКА ТЕКСТА ====
+    # ==== 2. Обычный текст ====
     text = (event.message.message or "").strip()
     if not text:
         return
 
-    if text.lower() == "/today":
-        await event.reply(f"📅 Сейчас: {get_date_time()}")
-        raise events.StopPropagation
+    text_lower = text.lower()
+    is_private = event.is_private
 
-    # далее твоя стандартная логика GPT-ответов
+    # Команды, у которых есть отдельные хендлеры — пропускаем
+    if text_lower.startswith(("/search", "/bash", "/clear", "/img", "/today")):
+        return
+
+    # В группах отвечаем только если есть триггер-слово
+    triggered = any(word in text_lower for word in TRIGGERS)
+    if not is_private and not triggered:
+        return
+
+    # Убираем триггер-слово из начала сообщения (в группах)
+    clean_text = text
+    if not is_private:
+        pattern = r"^(?:" + "|".join(TRIGGERS) + r")\s*[:,\\-–— ]*"
+        clean_text = re.sub(pattern, "", text, flags=re.IGNORECASE).strip()
+        if not clean_text:
+            clean_text = text
+
+    try:
+        # Показываем "печатает"
+        await event.client(
+            SetTypingRequest(
+                peer=event.chat_id,
+                action=SendMessageTypingAction(),
+            )
+        )
+
+        # История + запрос к OpenAI
+        filename, prompt = await start_and_check(event, clean_text, event.chat_id)
+        response = get_openai_response(prompt, filename)
+
+        # Отправляем ответ (с разбиением на части и т.п.)
+        await process_and_send_mess(event, response)
+
+        # Немного "случайной" активности, чтобы выглядеть живее
+        for _ in range(random.randint(2, 5)):
+            await asyncio.sleep(random.uniform(1.5, 3.5))
+            await event.client(
+                SetTypingRequest(
+                    peer=event.chat_id,
+                    action=random.choice(RANDOM_ACTION),
+                )
+            )
+
+    except Exception as e:
+        logging.error(f"Ошибка в universal_handler: {e}")
+        await event.reply("Ой, что-то сломалось… Попробуй ещё разок")
+
+    raise events.StopPropagation
+
+# Команды
+@events.register(events.NewMessage(pattern="/search"))
+async def search_handler(event):
+    await search(event)
+    raise events.StopPropagation
+
+@events.register(events.NewMessage(pattern="/bash"))
+async def bash_handler(event):
+    await bash(event)
+    raise events.StopPropagation
+
+@events.register(events.NewMessage(pattern="/clear"))
+async def clear_handler(event):
+    await bash(event)
+    raise events.StopPropagation
+    
+    
+@events.register(events.NewMessage(pattern="/img"))
+async def img_handler(event):
+    await generate_image(event)
+    raise events.StopPropagation
+
+
+@events.register(events.NewMessage(pattern="/today"))
+async def today_handler(event):
+    await event.reply(f"📅 Сейчас: {get_date_time()}")
+    raise events.StopPropagation

@@ -14,12 +14,16 @@ def create_initial_folders():
         os.makedirs(folder, exist_ok=True)
 
 
-def get_date_time():
-    tz_name = os.getenv("TIMEZONE", "Europe/Moscow")
-
+def get_date_time(zone: str | None = None) -> str:
+    """
+    Возвращает текущую дату/время.
+    Если передан zone — используем её.
+    Если нет — берём TIMEZONE из переменных окружения
+    (по умолчанию Europe/Moscow).
+    """
+    tz_name = zone or os.getenv("TIMEZONE", "Europe/Moscow")
     try:
-        tz = pytz.timezone(tz_name)
+        timezone = pytz.timezone(tz_name)
     except Exception:
-        tz = pytz.timezone("Europe/Moscow")
-
-    return datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S %Z")
+        timezone = pytz.timezone("Europe/Moscow")
+    return datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S %Z")

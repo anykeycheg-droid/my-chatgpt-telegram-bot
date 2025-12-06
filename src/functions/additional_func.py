@@ -2,6 +2,7 @@ import asyncio
 import io
 import json
 import logging
+import base64
 
 import openai
 from duckduckgo_search import DDGS  # ← ФИКС: DDGS вместо ddg (для v6.3.2+)
@@ -104,3 +105,77 @@ async def search(event: NewMessage) -> str:
     except Exception as e:
         logging.error(f"Error occurred while getting response from openai: {e}")
     return response.content
+
+async def analyze_image_with_gpt(image_bytes: bytes, question: str | None = None) -> str:
+    """
+    Анализ изображения с помощью GPT-4o-mini.
+    image_bytes — байты файла (фото, скрин и т.п.).
+    question — текстовый вопрос к картинке (если есть).
+    """
+    if not question:
+        question = "Опиши подробно, что изображено на этой картинке."
+
+    try:
+        img_b64 = base64.b64encode(image_bytes).decode("utf-8")
+
+        completion = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Ты умный ассистент, который помогает по изображениям. Отвечай по-русски, по сути и по делу."
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": question},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{img_b64}"
+                            },
+                        },
+                    ],
+                },
+            ],
+            max_tokens=800,
+        )
+        return completion.choices[0].message.content.strip()
+    except Exception as e:
+        logging.error(f"Ошибка OpenAI при анализе изображения: {e}")
+        return "Не получилось проанализировать изображение 😔"
+
+
+async def generate_image(event: NewMessage) -> None:
+    """
+    /img <описание> — генерация картинки через DALL·E и отправка прямо в чат.
+    """
+    text = (event.raw_text or "").strip()
+
+    # Ожидаем формат: /img что-то
+    parts = text.split(" ", maxsplit=1)
+    if len(parts) == 1 or not parts[1].strip():
+        await event.reply("Напиши после /img, что нужно нарисовать. Пример:\n/img кот космонавт в стиле пиксель-арт")
+        return
+
+    prompt = parts[1].strip()
+
+    try:
+        resp = openai.Image.create(
+            model="dall-e-3",
+            prompt=prompt,
+            n=1,
+            size="1024x1024",
+        )
+        url = resp["data"][0]["url"]
+
+        # Telethon умеет отправлять файл по URL
+        await event.client.send_file(
+            event.chat_id,
+            url,
+            caption=f"🎨 Вот что получилось по запросу:\n{prompt}",
+        )
+    except Exception as e:
+        logging.error(f"Ошибка OpenAI при генерации картинки: {e}")
+        await event.reply("Не получилось сгенерировать изображение 😔")
+    
