@@ -1,263 +1,87 @@
 import asyncio
 import json
 import logging
-import os
 from typing import List, Tuple
 
-import bardapi
-import google.generativeai as genai
-import openai
-import PIL.Image
-from bardapi import Bard
-from EdgeGPT.EdgeUtils import Query
-from openai.error import APIConnectionError
+import openai  # Импорт библиотеки
+from openai import OpenAIError  # Обновлённая ошибка для v1.0+ (декабрь 2025)
 from telethon.events import NewMessage
 
-import src.utils
-from src.utils import (
-    LOG_PATH,
-    Prompt,
-    num_tokens_from_messages,
-    read_existing_conversation,
-    split_text,
-)
+from src.utils import LOG_PATH, model, max_token, sys_mess, read_existing_conversation, num_tokens_from_messages
 
+Prompt = List[dict]
 
-async def over_token(
-    num_tokens: int, event: NewMessage, prompt: Prompt, filename: str
-) -> None:
-    MAX_TOKEN = src.utils.utils.max_token
-    SYS_MESS = src.utils.utils.sys_mess
-    MODEL = src.utils.utils.model
+# Глобальный клиент OpenAI (для стабильности в 2025)
+client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+async def over_token(num_tokens: int, event: NewMessage, prompt: Prompt, filename: str):
+    await event.reply(f"Разговор слишком длинный ({num_tokens} токенов), начинаю новый! 😅")
+    prompt.append({"role": "user", "content": "Кратко перескажи весь предыдущий разговор"})
     try:
-        await event.reply(
-            f"**Reach {num_tokens} tokens**, exceeds {MAX_TOKEN}, creating new chat"
-        )
-        prompt.append({"role": "user", "content": "summarize this conversation"})
-        completion = openai.ChatCompletion.create(model=MODEL, messages=prompt)
-        response = completion.choices[0].message.content
-        data = {"messages": SYS_MESS}
-        data["messages"].append({"role": "system", "content": response})
-        with open(filename, "w") as f:
-            json.dump(data, f, indent=4)
-        logging.debug(f"Successfully handle overtoken")
-    except Exception as e:
-        logging.error(f"Error occurred: {e}")
-        await event.reply("An error occurred: {}".format(str(e)))
+        resp = client.chat.completions.create(model=model, messages=prompt[:10])
+        summary = resp.choices[0].message.content
+        new_prompt = sys_mess + [{"role": "system", "content": f"Краткое резюме прошлой беседы: {summary}"}]
+        with open(filename, "w", encoding="utf-8") as f:
+            json.dump({"messages": new_prompt}, f, ensure_ascii=False, indent=4)
+    except OpenAIError as e:
+        logging.error(f"Ошибка суммаризации: {e}")
 
-
-async def start_and_check(
-    event: NewMessage, message: str, chat_id: int
-) -> Tuple[str, Prompt]:
-    MAX_TOKEN = src.utils.utils.max_token
-    try:
-        if not os.path.exists(f"{LOG_PATH}chats/session/{chat_id}.json"):
-            data = {"session": 1}
+async def start_and_check(event: NewMessage, message: str, chat_id: int) -> Tuple[str, Prompt]:
+    file_num, filename, prompt = await read_existing_conversation(chat_id)
+    prompt.append({"role": "user", "content": message})
+    
+    while True:
+        tokens = num_tokens_from_messages(prompt, model)  # Используем обновлённый счётчик
+        if tokens > max_token - 1000:
+            file_num += 1
             with open(f"{LOG_PATH}chats/session/{chat_id}.json", "w") as f:
-                json.dump(data, f)
-        while True:
-            file_num, filename, prompt = await read_existing_conversation(chat_id)
+                json.dump({"session": file_num}, f)
+            await over_token(tokens, event, prompt, filename)
+            _, filename, prompt = await read_existing_conversation(chat_id)
             prompt.append({"role": "user", "content": message})
-            num_tokens = num_tokens_from_messages(prompt)
-            if num_tokens > MAX_TOKEN:  # Cant summarize old chats
-                logging.warn(
-                    f"Number of tokens exceeds {MAX_TOKEN} limit, creating new chat"
-                )
-                file_num += 1
-                await event.reply(
-                    f"**Reach {num_tokens} tokens**, exceeds {MAX_TOKEN}, clear old chat, creating new chat"
-                )
-                data = {"session": file_num}
-                with open(f"{LOG_PATH}chats/session/{chat_id}.json", "w") as f:
-                    json.dump(data, f)
-                continue
-            elif num_tokens > MAX_TOKEN - 17:  # Summarize old chats
-                logging.warn(
-                    f"Number of tokens nearly exceeds {MAX_TOKEN} limit, summarizing old chats"
-                )
-                file_num += 1
-                data = {"session": file_num}
-                with open(f"{LOG_PATH}chats/session/{chat_id}.json", "w") as f:
-                    json.dump(data, f)
-                await over_token(num_tokens, event, prompt, filename)
-                continue
-            else:
-                break
-        logging.debug(f"Done start and check")
-    except Exception as e:
-        logging.error(f"Error occurred: {e}")
+        else:
+            break
     return filename, prompt
 
-
 def get_openai_response(prompt: Prompt, filename: str) -> str:
-    MAX_TOKEN = src.utils.utils.max_token
-    MODEL = src.utils.utils.model
-    trial = 0
-    while trial < 5:
-        try:
-            completion = openai.ChatCompletion.create(model=MODEL, messages=prompt)
-            result = completion.choices[0].message
-            num_tokens_left = MAX_TOKEN - completion.usage.total_tokens
-            responses = f"{result.content}\n\n__({num_tokens_left} tokens left)__"
-            prompt.append(result)
-            data = {"messages": prompt}
-            with open(filename, "w") as f:
-                json.dump(data, f, indent=4)
-            logging.debug("Received response from openai")
-            trial = 5
-        except APIConnectionError:
-            responses = "🔌 Render and OpenAI hate each other"
-            logging.error(f"API Connection failed: {e}")
-            trial += 1
-        except Exception as e:
-            responses = "💩 OpenAI is being stupid, please try again "
-            logging.error(f"Error occurred while getting response from openai: {e}")
-            trial += 1
-    return responses
-
-
-def get_bard_response(input_text: str) -> str:
     try:
-        if input_text.startswith("/timeout"):
-            split_text = input_text.split(maxsplit=2)
-            try:
-                timeout = int(split_text[1])
-            except Exception as e:
-                logging.error(f"Incorrect time input: {e}")
-                return "Incorrect time input! Correct input should follow: **/bard /timeout {number}**. For example: /bard /timeout 120"
-        else:
-            timeout = 60
-        try:
-            responses = Bard(token_from_browser=True).get_answer(input_text)
-            logging.debug("Received response from bard by token_from_browser")
-        except:
-            # Send an API request and get a response.
-            responses = bardapi.core.Bard(timeout=timeout).get_answer(input_text)[
-                "content"
-            ]
-            logging.debug("Received response from bard by token")
-    except Exception as e:
-        responses = "🤯 Bard is under construction, dont use it for now "
-        logging.error(f"Error occurred while getting response from bard: {e}")
-    return responses
-
-
-def get_gemini_response(input_text: str) -> str:
-    try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content(
-            input_text,
-            safety_settings=[
-                {
-                    "category": "HARM_CATEGORY_HARASSMENT",
-                    "threshold": "BLOCK_NONE",
-                },
-                {
-                    "category": "HARM_CATEGORY_HATE_SPEECH",
-                    "threshold": "BLOCK_NONE",
-                },
-                {
-                    "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                    "threshold": "BLOCK_NONE",
-                },
-                {
-                    "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                    "threshold": "BLOCK_NONE",
-                },
-            ],
+        response = client.chat.completions.create(
+            model=model,  # Точно o4-mini
+            messages=prompt,
+            max_tokens=1500,
+            temperature=0.8,
         )
-        responses = response.text
-    except Exception as e:
-        responses = "💩 Gemini is being stupid, please try again "
-        logging.error(f"Error occurred while getting response from gemini: {e}")
-    return responses
+        text = response.choices[0].message.content.strip()
+        prompt.append({"role": "assistant", "content": text})
+        
+        # Обновлённая обработка usage для o4-mini (с reasoning_tokens, декабрь 2025)
+        used = response.usage.total_tokens if response.usage else 0
+        reasoning_used = response.usage.completion_tokens_details.reasoning_tokens if hasattr(response.usage, 'completion_tokens_details') else 0
+        left = max_token - used - reasoning_used
+        
+        with open(filename, "w", encoding="utf-8") as f:
+            json.dump({"messages": prompt}, f, ensure_ascii=False, indent=4)
+        
+        return f"{text}\n\n__({left} токенов осталось, включая reasoning: {reasoning_used})__"
+        
+    except OpenAIError as e:
+        logging.error(f"OpenAI error (o4-mini): {e}")
+        return "Ой, OpenAI сейчас подтормаживает... Попробуй ещё раз через минуту 😏"
 
-
-def get_gemini_vison_response(input_text: str, img_path: str) -> str:
-    try:
-        img = PIL.Image.open(img_path)
-        try:
-            model = genai.GenerativeModel("gemini-1.5-flash")
-            response = model.generate_content(
-                [
-                    input_text,
-                    img,
-                ],
-                safety_settings=[
-                    {
-                        "category": "HARM_CATEGORY_HARASSMENT",
-                        "threshold": "BLOCK_NONE",
-                    },
-                    {
-                        "category": "HARM_CATEGORY_HATE_SPEECH",
-                        "threshold": "BLOCK_NONE",
-                    },
-                    {
-                        "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                        "threshold": "BLOCK_NONE",
-                    },
-                    {
-                        "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                        "threshold": "BLOCK_NONE",
-                    },
-                ],
-            )
-            response.resolve()
-            responses = response.text
-        except Exception as e:
-            responses = "💩 Gemini Vision is being stupid, please try again "
-            logging.error(f"Error occurred while getting response from gemini: {e}")
-    except Exception as e:
-        responses = "💩 Something wrong with processing the media"
-        logging.error(f"Error occurred while processing the media: {e}")
-    return responses
-
-
-def get_bing_response(input_text):
-    try:
-        COOKIE_PATH = os.getenv("COOKIE_PATH")
-        q = Query(
-            input_text,
-            style="creative",  # or: 'balanced', 'precise'
-            cookie_file=COOKIE_PATH,
-        )
-        responses = []
-        source_lst = []
-        messages = q.response["item"]["messages"]
-        for response_dict in messages:
-            if response_dict["author"] == "bot" and "text" in response_dict:
-                responses.append(response_dict["text"])
-                if "sourceAttributions" in response_dict:
-                    source_lst = [
-                        x["seeMoreUrl"] for x in response_dict["sourceAttributions"]
-                    ]
-
-        # TODO: replace sending suggest list by sources
-        suggest_lst = [
-            x["text"]
-            for x in response_dict["item"]["messages"][1]["suggestedResponses"]
-        ]
-        logging.debug("Received response from bing")
-    except Exception as e:
-        responses = "🤯 Bing is under construction, dont use it for now "
-        suggest_lst = []
-        logging.error(f"Error occurred while getting response from bing: {e}")
-    return responses, suggest_lst
-
-
+# Остальные функции (Gemini, Bing) — оставь как есть, если не используешь, или удали для чистоты
 async def process_and_send_mess(event, text: str, limit=500) -> None:
     text_lst = text.split("```")
     cur_limit = 4096
-    for idx, text in enumerate(text_lst):
+    for idx, part in enumerate(text_lst):
         if idx % 2 == 0:
-            mess_gen = split_text(text, cur_limit)
+            mess_gen = split_text(part, cur_limit)
             for mess in mess_gen:
                 await event.client.send_message(
                     event.chat_id, mess, background=True, silent=True
                 )
                 await asyncio.sleep(1)
         else:
-            mess_gen = split_text(text, cur_limit, prefix="```\n", sulfix="\n```")
+            mess_gen = split_text(part, cur_limit, prefix="```\n", suffix="\n```")
             for mess in mess_gen:
                 await event.client.send_message(
                     event.chat_id, mess, background=True, silent=True
