@@ -1,10 +1,9 @@
 fastapi==0.115.0
 uvicorn[standard]==0.31.1
 telethon==1.37.0
-openai==0.28.1  # Стабильная версия для Render, работает с gpt-4o-mini
+openai==0.28.1
 tiktoken==0.7.0
 coloredlogs==15.0.1
 python-dotenv==1.0.1
-duckduckgo-search==6.3.2  # Для /search
-Pillow==10.4.0  # Для фото
+duckduckgo-search==6.3.2
 pytz==2024.2
