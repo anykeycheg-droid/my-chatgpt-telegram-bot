@@ -1,19 +1,17 @@
 import asyncio
 import json
 import logging
-import base64
-import os
 from typing import List, Tuple
 
-from openai import OpenAI  # Новый импорт для v1+
-from openai import OpenAIError  # Обновлённая ошибка
+from openai import OpenAI  # Новый импорт для v1+ / 2.x
+from openai import APIError  # Обновлённая ошибка для 2025 (замена APIConnectionError)
 from telethon.events import NewMessage
 
 from src.utils import LOG_PATH, model, max_token, sys_mess, read_existing_conversation, num_tokens_from_messages
 
 Prompt = List[dict]
 
-# Клиент OpenAI (для v1.35.8+)
+# Клиент OpenAI (без proxies — Render сам обработает сеть)
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 async def over_token(num_tokens: int, event: NewMessage, prompt: Prompt, filename: str):
@@ -25,7 +23,7 @@ async def over_token(num_tokens: int, event: NewMessage, prompt: Prompt, filenam
         new_prompt = sys_mess + [{"role": "system", "content": f"Краткое резюме прошлой беседы: {summary}"}]
         with open(filename, "w", encoding="utf-8") as f:
             json.dump({"messages": new_prompt}, f, ensure_ascii=False, indent=4)
-    except OpenAIError as e:
+    except APIError as e:
         logging.error(f"Ошибка суммаризации: {e}")
 
 async def start_and_check(event: NewMessage, message: str, chat_id: int) -> Tuple[str, Prompt]:
@@ -53,6 +51,7 @@ def get_openai_response(prompt: Prompt, filename: str) -> str:
                 model=model,  # o4-mini
                 messages=prompt,
                 max_completion_tokens=1500,  # Для o4-mini
+                # temperature=0.8  # Убрано — не поддерживается в o4-mini
             )
             text = resp.choices[0].message.content.strip()
             prompt.append({"role": "assistant", "content": text})
@@ -64,7 +63,7 @@ def get_openai_response(prompt: Prompt, filename: str) -> str:
             left = max_token - used
             return f"{text}\n\n__({left} токенов осталось)__"
             
-        except OpenAIError as e:
+        except APIError as e:
             logging.error(f"OpenAI error: {e}")
             trial += 1
             if trial >= 5:
