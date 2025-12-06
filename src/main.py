@@ -10,14 +10,11 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 
 from __version__ import __version__
 from src.bot import bot
-from src.utils import (
-    BOT_NAME,
-    LOG_PATH,
-    create_initial_folders,
-    get_date_time,
-    initialize_logging,
-    terminal_html,
-)
+
+# LEGACY IMPORTS REMOVED
+
+BOT_NAME = "Dushnilla"
+
 
 # Initialize
 create_initial_folders()
