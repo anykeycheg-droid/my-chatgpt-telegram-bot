@@ -4,7 +4,7 @@ import logging
 from typing import List, Tuple
 
 import openai
-from openai.error import APIConnectionError  # Старый импорт для совместимости
+from openai.error import APIConnectionError
 from telethon.events import NewMessage
 
 from src.utils import LOG_PATH, model, max_token, sys_mess, read_existing_conversation, num_tokens_from_messages
@@ -45,7 +45,7 @@ def get_openai_response(prompt: Prompt, filename: str) -> str:
     while trial < 5:
         try:
             completion = openai.ChatCompletion.create(
-                model=model,  # o4-mini с fallback
+                model=model,  # o4-mini (работает в 0.28.1 через fallback)
                 messages=prompt,
                 max_tokens=1500,
                 temperature=0.8,
@@ -69,6 +69,7 @@ def get_openai_response(prompt: Prompt, filename: str) -> str:
             return "Ой, OpenAI сейчас подтормаживает... Попробуй ещё раз через минуту 😏"
 
 async def process_and_send_mess(event, text: str, limit=500) -> None:
+    from src.utils import split_text  # Импорт внутри, чтобы избежать циклических
     text_lst = text.split("```")
     cur_limit = 4096
     for idx, part in enumerate(text_lst):
