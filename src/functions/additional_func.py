@@ -4,18 +4,10 @@ import json
 import logging
 
 import openai
-from duckduckgo_search import ddg
-from src.utils import (
-    LOG_PATH,
-    VIETNAMESE_WORDS,
-    num_tokens_from_messages,
-    read_existing_conversation,
-)
+from duckduckgo_search import DDGS  # ← ФИКС: DDGS вместо ddg (для v6.3.2+)
+from src.utils import LOG_PATH, VIETNAMESE_WORDS, num_tokens_from_messages, read_existing_conversation
 from telethon.events import NewMessage
 from unidecode import unidecode
-
-# Functions for bot operation
-
 
 async def bash(event: NewMessage) -> str:
     try:
@@ -54,7 +46,6 @@ async def bash(event: NewMessage) -> str:
         logging.error(f"Error occurred: {e}")
     return OUTPUT
 
-
 async def search(event: NewMessage) -> str:
     chat_id = event.chat_id
     task = asyncio.create_task(read_existing_conversation(chat_id))
@@ -62,7 +53,9 @@ async def search(event: NewMessage) -> str:
     max_results = 20
     while True:
         try:
-            results = ddg(query, safesearch="Off", max_results=max_results)
+            # ← ФИКС: Используем DDGS вместо ddg (для новых версий)
+            with DDGS() as ddgs:
+                results = ddgs.text(query, max_results=max_results)
             results_decoded = unidecode(str(results)).replace("'", "'")
             user_content = f"Using the contents of these pages, summarize and give details about '{query}':\n{results_decoded}"
             if any(word in query for word in list(VIETNAMESE_WORDS)):
@@ -80,9 +73,7 @@ async def search(event: NewMessage) -> str:
                 continue
             logging.debug("Results derived from duckduckgo")
         except Exception as e:
-            logging.error(
-                f"Error occurred while getting duckduckgo search results: {e}"
-            )
+            logging.error(f"Error occurred while getting duckduckgo search results: {e}")
         break
 
     try:
