@@ -7,3 +7,4 @@ coloredlogs==15.0.1
 python-dotenv==1.0.1
 duckduckgo-search==6.3.2
 pytz==2024.2
+Unidecode
