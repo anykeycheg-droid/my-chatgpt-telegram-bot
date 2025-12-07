@@ -47,15 +47,18 @@ TRIGGERS = [
 
 @events.register(events.NewMessage)
 async def universal_handler(event):
+
+    # ✅ Нормально перехватываем StopPropagation — это не ошибка
     try:
+
         if event.out:
             return
 
         # ============================
         # Файлы и изображения
         # ============================
-        if event.message.media:
 
+        if event.message.media:
             try:
                 media_bytes = await event.client.download_media(
                     event.message,
@@ -84,7 +87,7 @@ async def universal_handler(event):
             raise events.StopPropagation
 
         # ============================
-        # Текстовые сообщения
+        # Текст
         # ============================
 
         text = (event.raw_text or "").strip()
@@ -134,11 +137,16 @@ async def universal_handler(event):
 
         await process_and_send_mess(event, gpt_answer)
 
-    except Exception:
-        logging.exception("GLOBAL HANDLER ERROR")
-        await event.reply("⚠️ Что-то пошло не так…")
+        raise events.StopPropagation
 
-    raise events.StopPropagation
+    except events.StopPropagation:
+        # ✅ ЭТО НОРМАЛЬНЫЙ КОНТРОЛЬ ПОТОКА, НЕ ЛОГИРУЕМ КАК ОШИБКУ
+        return
+
+    except Exception:
+        logging.exception("UNEXPECTED HANDLER ERROR")
+        await event.reply("⚠️ Что-то пошло не так…")
+        return
 
 
 # =======================
@@ -147,40 +155,55 @@ async def universal_handler(event):
 
 @events.register(events.NewMessage(pattern=r"/search"))
 async def search_handler(event):
-    query = (event.raw_text or "").replace("/search", "").strip()
-    answer = await search(query)
-    await event.reply(answer)
-    raise events.StopPropagation
+    try:
+        query = (event.raw_text or "").replace("/search", "").strip()
+        answer = await search(query)
+        await event.reply(answer)
+        raise events.StopPropagation
+    except events.StopPropagation:
+        return
 
 
 @events.register(events.NewMessage(pattern=r"/bash"))
 async def bash_handler(event):
-    cmd = (event.raw_text or "").replace("/bash", "").strip()
-    result = await bash(cmd)
-    await event.reply(result)
-    raise events.StopPropagation
+    try:
+        cmd = (event.raw_text or "").replace("/bash", "").strip()
+        result = await bash(cmd)
+        await event.reply(result)
+        raise events.StopPropagation
+    except events.StopPropagation:
+        return
 
 
 @events.register(events.NewMessage(pattern=r"/clear"))
 async def clear_handler(event):
-    await start_and_check(
-        event=event,
-        message="Очистка истории диалога",
-        chat_id=event.chat_id,
-    )
-    await event.reply("🗑 История диалога очищена!")
-    raise events.StopPropagation
+    try:
+        await start_and_check(
+            event=event,
+            message="Очистка истории диалога",
+            chat_id=event.chat_id,
+        )
+        await event.reply("🗑 История диалога очищена!")
+        raise events.StopPropagation
+    except events.StopPropagation:
+        return
 
 
 @events.register(events.NewMessage(pattern=r"/img"))
 async def img_handler(event):
-    prompt = (event.raw_text or "").replace("/img", "").strip()
-    url = await generate_image(prompt)
-    await event.reply(url)
-    raise events.StopPropagation
+    try:
+        prompt = (event.raw_text or "").replace("/img", "").strip()
+        url = await generate_image(prompt)
+        await event.reply(url)
+        raise events.StopPropagation
+    except events.StopPropagation:
+        return
 
 
 @events.register(events.NewMessage(pattern=r"/today"))
 async def today_handler(event):
-    await event.reply(f"📅 Сегодня: {get_date_time()}")
-    raise events.StopPropagation
+    try:
+        await event.reply(f"📅 Сегодня: {get_date_time()}")
+        raise events.StopPropagation
+    except events.StopPropagation:
+        return
