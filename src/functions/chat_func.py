@@ -1,93 +1,118 @@
+import os
+import json
 import logging
 from datetime import datetime
 
-from openai import OpenAI, APIError, RateLimitError, APIConnectionError
+from openai import AsyncOpenAI
 
 from src.utils import (
-    LOG_PATH,
-    read_existing_conversation,
+    sys_mess,
+    model,
+    max_token,
     num_tokens_from_messages,
 )
 
-# =====================
-# OPENAI CONFIG
-# =====================
 
-# Модель
-MODEL = "gpt-4o-mini"
-
-# Максимум токенов в истории
-MAX_TOKENS = 12000
-
-# Системное сообщение
-SYSTEM_MESSAGE = (
-    "Ты — помощник для сотрудников сети зоомагазинов «Четыре Лапы».\n"
-    "Говоришь строго на русском языке.\n"
-    "Ты дружелюбный, понятный и немного с юмором.\n"
-    "Всегда стараешься помогать максимально практично и по делу.\n\n"
-    "Ты знаешь сегодняшнюю дату: "
-    + datetime.now().strftime("%d.%m.%Y")
-)
-
-# =====================
-# CLIENT
-# =====================
-
-client = OpenAI()
+# =========================
+# INIT OPENAI CLIENT
+# =========================
+client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
-# =====================
-# CORE FUNCTIONS
-# =====================
+# =========================
+# FILE STORAGE
+# =========================
+BASE_PATH = "chats"
 
+os.makedirs(BASE_PATH, exist_ok=True)
+
+
+# =========================
+# START / LOAD CHAT
+# =========================
 async def start_and_check(chat_id: int, clear: bool = False):
     """
-    Загружает или очищает историю чата
+    Load or create chat history file.
     """
-    session_num, filename, history = await read_existing_conversation(
-        chat_id=chat_id,
-        clear=clear
-    )
+    filename = os.path.join(BASE_PATH, f"{chat_id}.json")
+
+    if clear and os.path.exists(filename):
+        os.remove(filename)
+
+    history = []
+
+    if os.path.exists(filename):
+        try:
+            with open(filename, "r", encoding="utf-8") as f:
+                history = json.load(f)
+        except Exception:
+            history = []
+
+    # добавляем системный промпт если его нет
+    if not history:
+        history = [
+            {"role": "system", "content": sys_mess}
+        ]
+
     return filename, history
 
 
-async def get_openai_response(messages: list[dict]) -> str:
-    """
-    Отправка запроса в OpenAI и получение ответа
-    """
+# =========================
+# SAVE CHAT
+# =========================
+def save_chat(filename, history):
+    try:
+        with open(filename, "w", encoding="utf-8") as f:
+            json.dump(history, f, ensure_ascii=False, indent=2)
+    except Exception:
+        logging.exception("Ошибка сохранения истории")
+
+
+# =========================
+# OPENAI REQUEST
+# =========================
+async def get_openai_response(history):
 
     try:
-        messages_with_system = [
-            {"role": "system", "content": SYSTEM_MESSAGE},
-            *messages
-        ]
-
-        # Контроль чрезмерной истории
-        tokens = num_tokens_from_messages(messages_with_system, MODEL)
-        if tokens > MAX_TOKENS:
-            messages_with_system = messages_with_system[-20:]
-
-        response = client.chat.completions.create(
-            model=MODEL,
-            messages=messages_with_system,
+        response = await client.chat.completions.create(
+            model=model,
+            messages=history,
+            max_tokens=max_token,
             temperature=0.7,
         )
 
-        text = response.choices[0].message.content.strip()
-        return text
+        message = response.choices[0].message.content.strip()
+        return message
 
-    except RateLimitError:
-        logging.error("OpenAI RateLimit")
-        return "Слишком много запросов к ИИ. Немного подожди и попробуй ещё раз."
+    except Exception:
+        logging.exception("OpenAI ERROR")
+        return "⚠️ OpenAI временно недоступен. Попробуй чуть позже."
 
-    except APIConnectionError:
-        logging.error("OpenAI Connection error")
-        return "Не удалось подключиться к сервису ИИ. Попробуй немного позже."
 
-    except APIError as e:
-        logging.error(f"OpenAI API error: {e}")
-        return "Произошла ошибка при работе с ИИ."
+# =========================
+# SEND MESSAGE TO TELEGRAM
+# =========================
+async def process_and_send_mess(event, answer: str):
 
-    except Exception as e:
-        logging.exception("Unexpected error while calling OpenAI")
-        return "Что-то пошло не так при обращении к ИИ."
+    max_length = 4000
+
+    # режем слишком длинный текст
+    chunks = [
+        answer[i:i + max_length]
+        for i in range(0, len(answer), max_length)
+    ]
+
+    for chunk in chunks:
+        await event.reply(chunk)
+
+    try:
+        # считаем токены
+        tokens_left = max_token - num_tokens_from_messages(answer)
+
+        await event.reply(
+            f"\n(осталось {tokens_left} токенов)"
+        )
+
+    except Exception:
+        pass
+
