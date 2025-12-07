@@ -164,3 +164,17 @@ async def read_existing_conversation(chat_id: int, clear=False):
 
         filename = f"{LOG_PATH}chats/chat_{chat_id}_0.json"
         return 0, filename, []
+
+def create_initial_folders():
+    """
+    Ensure all required directories exist
+    """
+    paths = [
+        LOG_PATH,
+        f"{LOG_PATH}chats/",
+        f"{LOG_PATH}chats/session/",
+        f"{LOG_PATH}images/",
+    ]
+
+    for path in paths:
+        os.makedirs(path, exist_ok=True)
