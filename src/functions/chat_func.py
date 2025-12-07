@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import base64
 from typing import List
 
 from openai import AsyncOpenAI
@@ -15,16 +16,13 @@ from src.utils import (
 # =========================
 # INIT OPENAI CLIENT
 # =========================
-client = AsyncOpenAI(
-    api_key=os.getenv("OPENAI_API_KEY")
-)
+client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # =========================
-# FILE STORAGE
+# STORAGE
 # =========================
 BASE_PATH = "chats"
 os.makedirs(BASE_PATH, exist_ok=True)
-
 
 # =========================
 # START / LOAD CHAT
@@ -34,15 +32,12 @@ async def start_and_check(
     clear: bool = False,
     user_text: str = None
 ):
-    """
-    Загружает или создаёт файл истории чата
-    """
     filename = os.path.join(BASE_PATH, f"{chat_id}.json")
 
     if clear and os.path.exists(filename):
         os.remove(filename)
 
-    history: List[dict] = []
+    history = []
 
     if os.path.exists(filename):
         try:
@@ -52,9 +47,7 @@ async def start_and_check(
             history = []
 
     if not history:
-        history = [
-            {"role": "system", "content": sys_mess}
-        ]
+        history = [{"role": "system", "content": sys_mess}]
 
     return filename, history
 
@@ -67,11 +60,11 @@ def save_chat(filename: str, history: List[dict]):
         with open(filename, "w", encoding="utf-8") as f:
             json.dump(history, f, ensure_ascii=False, indent=2)
     except Exception:
-        logging.exception("Ошибка сохранения истории")
+        logging.exception("Ошибка сохранения диалога")
 
 
 # =========================
-# TEXT GPT REQUEST
+# GPT TEXT REQUEST
 # =========================
 async def get_openai_response(history: List[dict]) -> str:
     try:
@@ -82,68 +75,65 @@ async def get_openai_response(history: List[dict]) -> str:
             temperature=0.7,
         )
 
-        message = response.choices[0].message.content.strip()
-        return message
+        return response.choices[0].message.content.strip()
 
     except Exception:
-        logging.exception("OpenAI ERROR")
-        return "⚠️ OpenAI временно недоступен. Попробуй чуть позже."
+        logging.exception("OpenAI error")
+        return "⚠️ OpenAI временно недоступен. Попробуй позже."
 
 
 # =========================
-# IMAGE GPT REQUEST
+# GPT IMAGE REQUEST
 # =========================
 async def analyze_image_with_gpt(
-        image_path: str,
-        user_prompt: str = "Что на изображении?"
+    image_path: str,
+    user_prompt: str = "Что на изображении?"
 ):
-    """
-    Анализ изображения через GPT Vision
-    """
 
     try:
-        with open(image_path, "rb") as img_file:
-            response = await client.chat.completions.create(
-                model=model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": user_prompt},
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/jpeg;base64,{
-                                        img_file.read().decode('latin-1')
-                                    }"
-                                },
-                            },
-                        ],
-                    }
-                ],
-                max_tokens=max_token,
-            )
+        with open(image_path, "rb") as f:
+            image_bytes = f.read()
+            image_b64 = base64.b64encode(image_bytes).decode("utf-8")
 
-        return response.choices[0].message.content
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{image_b64}"
+                            }
+                        },
+                    ],
+                }
+            ],
+            max_tokens=max_token,
+        )
+
+        return response.choices[0].message.content.strip()
 
     except Exception:
-        logging.exception("VISION OPENAI ERROR")
+        logging.exception("Vision GPT error")
         return "⚠️ Не удалось распознать изображение."
 
 
 # =========================
-# SEND MESSAGE TO TELEGRAM
+# TELEGRAM OUTPUT
 # =========================
 async def process_and_send_mess(event, answer: str):
 
     max_length = 4000
 
-    chunks = [
+    parts = [
         answer[i:i + max_length]
         for i in range(0, len(answer), max_length)
     ]
 
-    for part in chunks:
+    for part in parts:
         await event.reply(part)
 
     try:
