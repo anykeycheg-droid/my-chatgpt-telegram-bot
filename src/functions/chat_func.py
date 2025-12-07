@@ -30,16 +30,24 @@ async def start_and_check(
     message: str,
     chat_id: int,
 ) -> Tuple[str, Prompt]:
+
     session, filename, prompt = read_existing_conversation(str(chat_id))
 
-    prompt.append({"role": "user", "content": message})
+    prompt.append({
+        "role": "user",
+        "content": message
+    })
 
     tokens = num_tokens_from_messages(prompt)
 
     if tokens > max_token - 500:
         await over_token(tokens, event, prompt, filename)
+
         session, filename, prompt = read_existing_conversation(str(chat_id))
-        prompt.append({"role": "user", "content": message})
+        prompt.append({
+            "role": "user",
+            "content": message
+        })
 
     return filename, prompt
 
@@ -54,6 +62,7 @@ async def over_token(
     prompt: Prompt,
     filename: str,
 ):
+
     try:
         await event.reply(
             f"Диалог стал слишком длинным ({num_tokens} токенов). Начинаю новый 🙂"
@@ -102,9 +111,13 @@ async def get_openai_response(prompt: Prompt, filename: str) -> str:
                 temperature=0.6,
             )
 
-            text = completion.choices[0].message.content.strip()
+            message = completion.choices[0].message
 
-            prompt.append(completion.choices[0].message)
+            # ✅ Сериализуем ТОЛЬКО dict, а не объект SDK
+            prompt.append({
+                "role": message.role,
+                "content": message.content,
+            })
 
             with open(filename, "w", encoding="utf-8") as f:
                 json.dump(
@@ -117,7 +130,7 @@ async def get_openai_response(prompt: Prompt, filename: str) -> str:
             used = completion.usage.total_tokens
             remain = max(0, max_token - used)
 
-            return f"{text}\n\n_(осталось {remain} токенов)_"
+            return f"{message.content.strip()}\n\n_(осталось {remain} токенов)_"
 
         except Exception as e:
             logging.error(f"OpenAI error ({attempt}/5): {e}")
