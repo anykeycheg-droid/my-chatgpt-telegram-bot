@@ -1,7 +1,7 @@
 import os
 import json
 import logging
-from datetime import datetime
+from typing import List
 
 from openai import AsyncOpenAI
 
@@ -12,34 +12,37 @@ from src.utils import (
     num_tokens_from_messages,
 )
 
-
 # =========================
 # INIT OPENAI CLIENT
 # =========================
-client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
+client = AsyncOpenAI(
+    api_key=os.getenv("OPENAI_API_KEY")
+)
 
 # =========================
 # FILE STORAGE
 # =========================
 BASE_PATH = "chats"
-
 os.makedirs(BASE_PATH, exist_ok=True)
 
 
 # =========================
 # START / LOAD CHAT
 # =========================
-async def start_and_check(chat_id: int, clear: bool = False):
+async def start_and_check(
+    chat_id: int,
+    clear: bool = False,
+    user_text: str = None
+):
     """
-    Load or create chat history file.
+    Загружает или создаёт файл истории чата
     """
     filename = os.path.join(BASE_PATH, f"{chat_id}.json")
 
     if clear and os.path.exists(filename):
         os.remove(filename)
 
-    history = []
+    history: List[dict] = []
 
     if os.path.exists(filename):
         try:
@@ -48,7 +51,6 @@ async def start_and_check(chat_id: int, clear: bool = False):
         except Exception:
             history = []
 
-    # добавляем системный промпт если его нет
     if not history:
         history = [
             {"role": "system", "content": sys_mess}
@@ -60,7 +62,7 @@ async def start_and_check(chat_id: int, clear: bool = False):
 # =========================
 # SAVE CHAT
 # =========================
-def save_chat(filename, history):
+def save_chat(filename: str, history: List[dict]):
     try:
         with open(filename, "w", encoding="utf-8") as f:
             json.dump(history, f, ensure_ascii=False, indent=2)
@@ -69,10 +71,9 @@ def save_chat(filename, history):
 
 
 # =========================
-# OPENAI REQUEST
+# TEXT GPT REQUEST
 # =========================
-async def get_openai_response(history):
-
+async def get_openai_response(history: List[dict]) -> str:
     try:
         response = await client.chat.completions.create(
             model=model,
@@ -90,24 +91,64 @@ async def get_openai_response(history):
 
 
 # =========================
+# IMAGE GPT REQUEST
+# =========================
+async def analyze_image_with_gpt(
+        image_path: str,
+        user_prompt: str = "Что на изображении?"
+):
+    """
+    Анализ изображения через GPT Vision
+    """
+
+    try:
+        with open(image_path, "rb") as img_file:
+            response = await client.chat.completions.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": user_prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{
+                                        img_file.read().decode('latin-1')
+                                    }"
+                                },
+                            },
+                        ],
+                    }
+                ],
+                max_tokens=max_token,
+            )
+
+        return response.choices[0].message.content
+
+    except Exception:
+        logging.exception("VISION OPENAI ERROR")
+        return "⚠️ Не удалось распознать изображение."
+
+
+# =========================
 # SEND MESSAGE TO TELEGRAM
 # =========================
 async def process_and_send_mess(event, answer: str):
 
     max_length = 4000
 
-    # режем слишком длинный текст
     chunks = [
         answer[i:i + max_length]
         for i in range(0, len(answer), max_length)
     ]
 
-    for chunk in chunks:
-        await event.reply(chunk)
+    for part in chunks:
+        await event.reply(part)
 
     try:
-        # считаем токены
-        tokens_left = max_token - num_tokens_from_messages(answer)
+        used_tokens = num_tokens_from_messages(answer)
+        tokens_left = max(0, max_token - used_tokens)
 
         await event.reply(
             f"\n(осталось {tokens_left} токенов)"
@@ -115,4 +156,3 @@ async def process_and_send_mess(event, answer: str):
 
     except Exception:
         pass
-
