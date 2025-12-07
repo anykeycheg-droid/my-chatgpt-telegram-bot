@@ -134,12 +134,10 @@ async def start_and_check(
 # OPENAI REQUEST
 # ====================================
 
-def get_openai_response(
-    prompt: Prompt,
-    filename: str
-) -> str:
+def get_openai_response(prompt: Prompt, filename: str) -> str:
+    trial = 0
 
-    for attempt in range(1, 6):
+    while trial < 5:
         try:
             completion = client.chat.completions.create(
                 model=model,
@@ -148,10 +146,14 @@ def get_openai_response(
                 max_tokens=1500,
             )
 
-            text = completion.choices[0].message.content.strip()
+            message = completion.choices[0].message
+            text = message.content.strip()
 
-            # save assistant reply
-            prompt.append(completion.choices[0].message)
+            # ✅ СОХРАНЯЕМ ТОЛЬКО СЛОВАРЬ, А НЕ SDK ОБЪЕКТ
+            prompt.append({
+                "role": message.role,
+                "content": message.content
+            })
 
             with open(filename, "w", encoding="utf-8") as f:
                 json.dump(
@@ -164,16 +166,15 @@ def get_openai_response(
             used = completion.usage.total_tokens
             remain = max(0, max_token - used)
 
-            return f"{text}\n\n__({remain} токенов осталось)__"
+            return f"{text}\n\n__(осталось {remain} токенов)__"
 
         except Exception as e:
-            logging.error(
-                f"OpenAI error ({attempt}/5): {e}"
-            )
-
+            trial += 1
+            logging.error(f"OpenAI error ({trial}/5): {e}")
             time.sleep(2)
 
     return "⚠ OpenAI временно недоступен. Попробуй позже."
+
 
 
 # ====================================
