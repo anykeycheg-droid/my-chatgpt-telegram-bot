@@ -5,20 +5,20 @@ from telethon import events
 from telethon.tl.functions.messages import SetTypingRequest
 from telethon.tl.types import SendMessageTypingAction
 
-from functions.additional_func import (
+from src.functions.additional_func import (
     bash,
     search,
     generate_image,
     analyze_image_with_gpt,
 )
 
-from functions.chat_func import (
+from src.functions.chat_func import (
     process_and_send_mess,
     start_and_check,
     get_openai_response,
 )
 
-from utils import get_date_time
+from src.utils import get_date_time
 
 
 # =======================
@@ -48,44 +48,43 @@ TRIGGERS = [
 @events.register(events.NewMessage)
 async def universal_handler(event):
     try:
-        # не отвечаем на свои
         if event.out:
             return
 
         # ============================
-        # Работа с фото и файлами
+        # Файлы и изображения
         # ============================
         if event.message.media:
 
             try:
                 media_bytes = await event.client.download_media(
                     event.message,
-                    file=bytes
+                    file=bytes,
                 )
 
                 if not media_bytes:
-                    await event.reply("⚠️ Файл получил, но не смог скачать.")
+                    await event.reply("⚠️ Не удалось получить файл.")
                     return
 
-                await event.reply("👀 Файл получен — анализирую...")
+                await event.reply("👀 Анализирую изображение...")
 
                 caption = (event.message.text or "").strip() or None
 
                 answer = await analyze_image_with_gpt(
                     image_bytes=media_bytes,
-                    user_prompt=caption
+                    user_prompt=caption,
                 )
 
                 await event.reply(answer)
 
             except Exception:
-                logging.exception("Ошибка обработки media")
-                await event.reply("❌ Не получилось обработать файл 😔")
+                logging.exception("Ошибка обработки изображения")
+                await event.reply("❌ Не удалось обработать файл.")
 
             raise events.StopPropagation
 
         # ============================
-        # Работа с текстом
+        # Текстовые сообщения
         # ============================
 
         text = (event.raw_text or "").strip()
@@ -95,7 +94,6 @@ async def universal_handler(event):
         text_lower = text.lower()
         is_private = event.is_private
 
-        # Команды обрабатываются отдельными хендлерами
         if text_lower.startswith((
             "/search",
             "/bash",
@@ -107,26 +105,18 @@ async def universal_handler(event):
 
         triggered = any(t in text_lower for t in TRIGGERS)
 
-        # В группах отвечаем только если был триггер
         if not is_private and not triggered:
             return
 
-        # Убираем триггер из запроса
         cleaned_text = text
 
         if not is_private:
             pattern = r"^(?:" + "|".join(map(re.escape, TRIGGERS)) + r")\s*[:,—–\- ]*"
-            cleaned_text = re.sub(
-                pattern,
-                "",
-                text,
-                flags=re.IGNORECASE
-            ).strip()
+            cleaned_text = re.sub(pattern, "", text, flags=re.IGNORECASE).strip()
 
             if not cleaned_text:
                 cleaned_text = text
 
-        # Печатаем "typing"
         await event.client(
             SetTypingRequest(
                 peer=event.chat_id,
@@ -134,29 +124,19 @@ async def universal_handler(event):
             )
         )
 
-        # ============================
-        # GPT обработка
-        # ============================
-
         filename, history = await start_and_check(
-            chat_id=event.chat_id
+            event=event,
+            message=cleaned_text,
+            chat_id=event.chat_id,
         )
 
-        history.append({
-            "role": "user",
-            "content": cleaned_text
-        })
+        gpt_answer = await get_openai_response(history, filename)
 
-        gpt_answer = await get_openai_response(history)
-
-        await process_and_send_mess(
-            event,
-            gpt_answer,
-        )
+        await process_and_send_mess(event, gpt_answer)
 
     except Exception:
         logging.exception("GLOBAL HANDLER ERROR")
-        await event.reply("⚠️ Ой, что-то сломалось… Попробуй ещё раз.")
+        await event.reply("⚠️ Что-то пошло не так…")
 
     raise events.StopPropagation
 
@@ -167,32 +147,36 @@ async def universal_handler(event):
 
 @events.register(events.NewMessage(pattern=r"/search"))
 async def search_handler(event):
-    await search(event)
+    query = (event.raw_text or "").replace("/search", "").strip()
+    answer = await search(query)
+    await event.reply(answer)
     raise events.StopPropagation
 
 
 @events.register(events.NewMessage(pattern=r"/bash"))
 async def bash_handler(event):
-    await bash(event)
+    cmd = (event.raw_text or "").replace("/bash", "").strip()
+    result = await bash(cmd)
+    await event.reply(result)
     raise events.StopPropagation
 
 
 @events.register(events.NewMessage(pattern=r"/clear"))
 async def clear_handler(event):
-    filename, _ = await start_and_check(
+    await start_and_check(
+        event=event,
+        message="Очистка истории диалога",
         chat_id=event.chat_id,
-        clear=True,
     )
-
-    if filename:
-        await event.reply("🗑 История диалога очищена!")
-
+    await event.reply("🗑 История диалога очищена!")
     raise events.StopPropagation
 
 
 @events.register(events.NewMessage(pattern=r"/img"))
 async def img_handler(event):
-    await generate_image(event)
+    prompt = (event.raw_text or "").replace("/img", "").strip()
+    url = await generate_image(prompt)
+    await event.reply(url)
     raise events.StopPropagation
 
 

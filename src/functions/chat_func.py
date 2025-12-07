@@ -1,14 +1,12 @@
 import json
 import logging
-import os
-import base64
 import time
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 
 from openai import OpenAI
 from telethon.events import NewMessage
 
-from utils import (
+from src.utils import (
     LOG_PATH,
     model,
     max_token,
@@ -24,55 +22,6 @@ Prompt = List[dict]
 
 
 # ==============================
-# IMAGE ANALYSIS
-# ==============================
-
-async def analyze_image_with_gpt(
-    image_path: str,
-    user_prompt: Optional[str] = None
-) -> str:
-    """
-    Анализ изображения через GPT.
-    Полностью совместим с handlers.py
-    """
-
-    try:
-        with open(image_path, "rb") as f:
-            image_data = base64.b64encode(
-                f.read()
-            ).decode("utf-8")
-
-        if not user_prompt:
-            user_prompt = "Что изображено на фотографии?"
-
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": user_prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{image_data}"
-                            }
-                        },
-                    ],
-                }
-            ],
-            max_tokens=max_token,
-            temperature=0.2,
-        )
-
-        return response.choices[0].message.content.strip()
-
-    except Exception:
-        logging.exception("Ошибка анализа изображения")
-        return "⚠️ Не удалось распознать изображение."
-
-
-# ==============================
 # CHAT FLOW
 # ==============================
 
@@ -81,30 +30,16 @@ async def start_and_check(
     message: str,
     chat_id: int,
 ) -> Tuple[str, Prompt]:
-    file_num, filename, prompt = await read_existing_conversation(chat_id)
+    session, filename, prompt = read_existing_conversation(str(chat_id))
 
-    prompt.append(
-        {"role": "user", "content": message}
-    )
+    prompt.append({"role": "user", "content": message})
 
-    while True:
-        tokens = num_tokens_from_messages(prompt, model)
+    tokens = num_tokens_from_messages(prompt)
 
-        if tokens > max_token - 1000:
-            file_num += 1
-
-            with open(f"{LOG_PATH}/chats/session/{chat_id}.json", "w") as f:
-                json.dump({"session": file_num}, f)
-
-            await over_token(tokens, event, prompt, filename)
-            _, filename, prompt = await read_existing_conversation(chat_id)
-
-            prompt.append(
-                {"role": "user", "content": message}
-            )
-
-        else:
-            break
+    if tokens > max_token - 500:
+        await over_token(tokens, event, prompt, filename)
+        session, filename, prompt = read_existing_conversation(str(chat_id))
+        prompt.append({"role": "user", "content": message})
 
     return filename, prompt
 
@@ -121,7 +56,7 @@ async def over_token(
 ):
     try:
         await event.reply(
-            f"Диалог стал слишком длинным ({num_tokens} токенов). Начинаю новый чат 🙂"
+            f"Диалог стал слишком длинным ({num_tokens} токенов). Начинаю новый 🙂"
         )
 
         completion = client.chat.completions.create(
@@ -141,7 +76,12 @@ async def over_token(
         ]
 
         with open(filename, "w", encoding="utf-8") as f:
-            json.dump({"messages": new_prompt}, f, ensure_ascii=False, indent=2)
+            json.dump(
+                {"session": 0, "messages": new_prompt},
+                f,
+                ensure_ascii=False,
+                indent=2
+            )
 
     except Exception as e:
         logging.error(f"Ошибка обрезки диалога: {e}")
@@ -151,7 +91,7 @@ async def over_token(
 # OPENAI RESPONSE
 # ==============================
 
-def get_openai_response(prompt: Prompt, filename: str) -> str:
+async def get_openai_response(prompt: Prompt, filename: str) -> str:
 
     for attempt in range(1, 6):
         try:
@@ -167,7 +107,12 @@ def get_openai_response(prompt: Prompt, filename: str) -> str:
             prompt.append(completion.choices[0].message)
 
             with open(filename, "w", encoding="utf-8") as f:
-                json.dump({"messages": prompt}, f, ensure_ascii=False, indent=2)
+                json.dump(
+                    {"messages": prompt},
+                    f,
+                    ensure_ascii=False,
+                    indent=2
+                )
 
             used = completion.usage.total_tokens
             remain = max(0, max_token - used)

@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from __version__ import __version__
-from bot import bot
+from src.bot import bot
 
 # ===================
 # Basic App Settings

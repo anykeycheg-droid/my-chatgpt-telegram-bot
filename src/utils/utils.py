@@ -1,4 +1,5 @@
 import os
+import json
 import datetime
 
 # =====================================================
@@ -7,29 +8,23 @@ import datetime
 
 LOG_PATH = "logs"
 
-# Модель для OpenAI
 model = "gpt-4.1-mini"
 
-# Максимальный размер ответа
 max_token = 2000
 
 
 # =====================================================
-# Системное сообщение для ChatGPT
+# SYSTEM PROMPT
 # =====================================================
 
 sys_mess = """
-Ты — помощник для сотрудников сети зоомагазинов «4 ЛАПЫ».
+Ты — помощник для сотрудников сети зоомагазинов «ЧЕТЫРЕ ЛАПЫ».
 
-Твои задачи:
-- Помогать по работе магазина.
-- Подсказывать по товарам и сервисам.
-- Помогать с регламентами, обучением и стандартами обслуживания.
-- Отвечать только на русском языке.
-- Текущая дата должна учитываться при ответах.
+Отвечай только на русском языке.
 
-Стиль общения:
-Дружелюбный, рабочий, с лёгким юмором и подколами, но всегда на результат.
+Всегда будь вежлив, полезен и ориентирован на решение рабочих задач.
+
+Текущая дата учитывается при ответах.
 """
 
 
@@ -37,34 +32,40 @@ sys_mess = """
 # Утилиты
 # =====================================================
 
-def get_date_time() -> str:
-    """Возвращает текущую дату и время."""
+def get_date_time():
     return datetime.datetime.now().strftime("%d.%m.%Y %H:%M")
 
 
 def create_initial_folders():
-    """
-    Создает необходимые папки при старте приложения.
-    """
-    os.makedirs(LOG_PATH, exist_ok=True)
+    os.makedirs(f"{LOG_PATH}/chats", exist_ok=True)
 
 
-def read_existing_conversation(filename: str) -> list:
-    """
-    Читает историю диалога из файла.
-    """
+def read_existing_conversation(chat_id: str):
+    create_initial_folders()
+
+    filename = f"{LOG_PATH}/chats/{chat_id}.json"
+
     try:
-        with open(filename, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-            return [{"role": "user", "content": line.strip()} for line in lines]
+        with open(filename, encoding="utf-8") as f:
+            data = json.load(f)
+            return data.get("session", 0), filename, data.get("messages", [])
+
     except FileNotFoundError:
-        return []
+        prompt = [{"role": "system", "content": sys_mess}]
+        session = 0
+
+        with open(filename, "w", encoding="utf-8") as f:
+            json.dump(
+                {"session": session, "messages": prompt},
+                f,
+                ensure_ascii=False,
+                indent=2
+            )
+
+        return session, filename, prompt
 
 
-def num_tokens_from_messages(messages: list) -> int:
-    """
-    Простейшая оценка токенов (примерная).
-    """
+def num_tokens_from_messages(messages: list):
     total = 0
     for msg in messages:
         total += len(str(msg.get("content", ""))) // 4
