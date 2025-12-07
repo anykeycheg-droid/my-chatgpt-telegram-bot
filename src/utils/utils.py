@@ -5,78 +5,61 @@ import tiktoken
 from datetime import datetime
 from typing import List
 
-# =====================
-# PATH SETTINGS
-# =====================
-
-LOG_PATH = "logs/"
-
-CHATS_PATH = f"{LOG_PATH}chats"
-HISTORY_PATH = f"{LOG_PATH}chats/history"
-SESSION_PATH = f"{LOG_PATH}chats/session"
-MEDIA_PATH = f"{LOG_PATH}media"
-
-os.makedirs(CHATS_PATH, exist_ok=True)
-os.makedirs(HISTORY_PATH, exist_ok=True)
-os.makedirs(SESSION_PATH, exist_ok=True)
-os.makedirs(MEDIA_PATH, exist_ok=True)
 
 # =====================
-# GENERAL SETTINGS
+# BASE PATHS
+# =====================
+
+LOG_PATH = "logs"
+CHATS_PATH = f"{LOG_PATH}/chats"
+HISTORY_PATH = f"{CHATS_PATH}/history"
+SESSION_PATH = f"{CHATS_PATH}/session"
+MEDIA_PATH = f"{LOG_PATH}/media"
+
+
+def create_initial_folders():
+    """
+    Create required working directories
+    """
+    for path in [
+        LOG_PATH,
+        CHATS_PATH,
+        HISTORY_PATH,
+        SESSION_PATH,
+        MEDIA_PATH,
+    ]:
+        os.makedirs(path, exist_ok=True)
+
+
+create_initial_folders()
+
+
+# =====================
+# GENERAL
 # =====================
 
 BOT_NAME = "Dushnilla"
 
-VIETNAMESE_WORDS = [
-    "xin",
-    "chao",
-    "cam",
-    "on",
-    "toi",
-    "ban",
-    "viet",
-    "nam",
-]
 
 # =====================
 # TIME
 # =====================
 
 def get_date_time(zone: str | None = None) -> str:
-    tz_name = zone or os.getenv("TIMEZONE", "Europe/Moscow")
+    timezone_name = zone or os.getenv("TIMEZONE", "Europe/Moscow")
     try:
-        timezone = pytz.timezone(tz_name)
+        timezone = pytz.timezone(timezone_name)
     except Exception:
         timezone = pytz.timezone("Europe/Moscow")
+
     return datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S %Z")
-
-
-# =====================
-# LOGGING INIT
-# =====================
-
-def initialize_logging():
-    import logging
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
-    )
-
-    logging.info("Logging initialized")
 
 
 # =====================
 # TEXT UTILS
 # =====================
 
-def split_text(
-    text: str,
-    limit: int,
-    prefix: str = "",
-    suffix: str = ""
-) -> List[str]:
-
+def split_text(text: str, limit: int, prefix: str = "", suffix: str = "") -> List[str]:
     if not text:
         return [""]
 
@@ -113,7 +96,7 @@ def num_tokens_from_messages(messages, model="gpt-4o-mini") -> int:
     for msg in messages:
         num_tokens += tokens_per_message
         for key, value in msg.items():
-            num_tokens += len(encoding.encode(value))
+            num_tokens += len(encoding.encode(str(value)))
             if key == "name":
                 num_tokens += tokens_per_name
 
@@ -127,31 +110,30 @@ def num_tokens_from_messages(messages, model="gpt-4o-mini") -> int:
 
 async def read_existing_conversation(chat_id: int, clear=False):
     """
-    Loads or initializes chat history
+    Load or initialize session history
     """
+
     session_file = f"{SESSION_PATH}/{chat_id}.json"
 
     if os.path.exists(session_file):
-        with open(session_file) as f:
+        with open(session_file, "r", encoding="utf-8") as f:
             session_data = json.load(f)
 
         session_num = session_data.get("session", 0)
-
-        filename = f"{LOG_PATH}chats/chat_{chat_id}_{session_num}.json"
+        filename = f"{CHATS_PATH}/chat_{chat_id}_{session_num}.json"
 
         if clear:
             session_num += 1
-
-            with open(session_file, "w") as f:
+            with open(session_file, "w", encoding="utf-8") as f:
                 json.dump({"session": session_num}, f)
 
-            filename = f"{LOG_PATH}chats/chat_{chat_id}_{session_num}.json"
+            filename = f"{CHATS_PATH}/chat_{chat_id}_{session_num}.json"
             return session_num, filename, []
 
-        try:
-            with open(filename) as f:
+        if os.path.exists(filename):
+            with open(filename, "r", encoding="utf-8") as f:
                 history = json.load(f).get("messages", [])
-        except FileNotFoundError:
+        else:
             history = []
 
         return session_num, filename, history
@@ -159,22 +141,8 @@ async def read_existing_conversation(chat_id: int, clear=False):
     else:
         os.makedirs(os.path.dirname(session_file), exist_ok=True)
 
-        with open(session_file, "w") as f:
+        with open(session_file, "w", encoding="utf-8") as f:
             json.dump({"session": 0}, f)
 
-        filename = f"{LOG_PATH}chats/chat_{chat_id}_0.json"
+        filename = f"{CHATS_PATH}/chat_{chat_id}_0.json"
         return 0, filename, []
-
-def create_initial_folders():
-    """
-    Ensure all required directories exist
-    """
-    paths = [
-        LOG_PATH,
-        f"{LOG_PATH}chats/",
-        f"{LOG_PATH}chats/session/",
-        f"{LOG_PATH}images/",
-    ]
-
-    for path in paths:
-        os.makedirs(path, exist_ok=True)

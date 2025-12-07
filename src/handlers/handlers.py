@@ -1,4 +1,3 @@
-import os
 import re
 import logging
 
@@ -19,7 +18,7 @@ from src.functions.chat_func import (
     get_openai_response,
 )
 
-from src.utils import get_date_time, create_initial_folders
+from src.utils import get_date_time
 
 
 # =======================
@@ -29,19 +28,17 @@ from src.utils import get_date_time, create_initial_folders
 TRIGGERS = [
     "душнилла",
     "бот",
-    "@DushnillaBot",
+    "@dushnillabot",
     "душ",
     "душик",
     "душнила",
     "душечка",
-    "дух",
+    "du sh",
     "dush",
     "dushik",
     "dushnila",
     "dushnilla"
 ]
-
-create_initial_folders()
 
 
 # =======================
@@ -51,82 +48,86 @@ create_initial_folders()
 @events.register(events.NewMessage)
 async def universal_handler(event):
     try:
-        # Не отвечаем на свои сообщения
+        # не отвечаем на свои
         if event.out:
             return
 
-        # ==== 1. Media (фото, файлы) ====
-        if getattr(event.message, "media", None):
+        # ============================
+        # Работа с фото и файлами
+        # ============================
+        if event.message.media:
+
             try:
                 media_bytes = await event.client.download_media(
                     event.message,
                     file=bytes
                 )
 
-                if media_bytes:
-                    await event.client.send_file(
-                        event.chat_id,
-                        media_bytes,
-                        caption="✅ Файл принят, анализирую…",
-                    )
+                if not media_bytes:
+                    await event.reply("⚠️ Я получил файл, но не смог его скачать.")
+                    return
 
-                    caption = (event.message.message or "").strip()
-                    answer = await analyze_image_with_gpt(
-                        media_bytes,
-                        caption or None
-                    )
+                # Уведомляем что анализируем
+                await event.reply("👀 Файл получен — анализирую...")
 
-                    await event.reply(answer)
+                caption = (event.message.text or "").strip() or None
 
-                else:
-                    await event.reply(
-                        "Я получил файл, но не смог его скачать 😔"
-                    )
-
-            except Exception:
-                logging.exception(
-                    "Ошибка обработки media в universal_handler"
+                answer = await analyze_image_with_gpt(
+                    image_bytes=media_bytes,
+                    user_prompt=caption
                 )
-                await event.reply("Не получилось обработать файл 😔")
+
+                await event.reply(answer)
+
+            except Exception as e:
+                logging.exception("Ошибка обработки media")
+                await event.reply("❌ Не получилось обработать файл 😔")
 
             raise events.StopPropagation
 
-        # ==== 2. Текстовые сообщения ====
-        text = (event.message.message or "").strip()
+        # ============================
+        # Работа с текстом
+        # ============================
+
+        text = (event.raw_text or "").strip()
         if not text:
             return
 
         text_lower = text.lower()
         is_private = event.is_private
 
-        # ---- команды идут отдельными хэндлерами ----
-        if text_lower.startswith(
-            ("/search", "/bash", "/clear", "/img", "/today")
-        ):
+        # Командные хендлеры отдельно
+        if text_lower.startswith((
+            "/search",
+            "/bash",
+            "/clear",
+            "/img",
+            "/today"
+        )):
             return
 
-        # ---- В группах работаем только с триггером ----
-        triggered = any(word in text_lower for word in TRIGGERS)
+        # В группах отвечаем только по триггеру
+        triggered = any(t in text_lower for t in TRIGGERS)
+
         if not is_private and not triggered:
             return
 
-        # ---- чистим триггер ----
-        clean_text = text
+        # Убираем триггер из запроса
+        cleaned_text = text
 
         if not is_private:
-            escaped_triggers = [re.escape(t) for t in TRIGGERS]
-            pattern = r"^(?:" + "|".join(escaped_triggers) + r")\s*[:,\\\-–— ]*"
-            clean_text = re.sub(
+            pattern = r"^(?:" + "|".join(map(re.escape, TRIGGERS)) + r")\s*[:,—–\- ]*"
+            cleaned_text = re.sub(
                 pattern,
                 "",
                 text,
                 flags=re.IGNORECASE
             ).strip()
 
-            if not clean_text:
-                clean_text = text
+            if not cleaned_text:
+                cleaned_text = text
 
-        # ==== typing ====
+        # Показ индикатора typing
         await event.client(
             SetTypingRequest(
                 peer=event.chat_id,
@@ -134,26 +135,29 @@ async def universal_handler(event):
             )
         )
 
-        # ==== GPT обработка ====
+        # ============================
+        # GPT обработка
+        # ============================
+
         filename, prompt = await start_and_check(
-            event,
-            clean_text,
-            event.chat_id
+            event=event,
+            user_text=cleaned_text,
+            chat_id=event.chat_id
         )
 
-        response = get_openai_response(
-            prompt,
-            filename
+        gpt_response = get_openai_response(
+            prompt=prompt,
+            filename=filename
         )
 
         await process_and_send_mess(
             event,
-            response,
+            gpt_response,
         )
 
     except Exception as e:
-        logging.exception("Ошибка universal_handler")
-        await event.reply("Ой, что-то сломалось… Попробуй ещё раз")
+        logging.exception("GLOBAL HANDLER ERROR")
+        await event.reply("⚠️ Ой, что-то сломалось… Попробуй ещё раз.")
 
     raise events.StopPropagation
 
@@ -176,11 +180,10 @@ async def bash_handler(event):
 
 @events.register(events.NewMessage(pattern=r"/clear"))
 async def clear_handler(event):
-    # очищаем историю диалога
     filename, _ = await start_and_check(
-        event,
-        "",
-        event.chat_id,
+        event=event,
+        user_text="",
+        chat_id=event.chat_id,
         clear=True,
     )
 
@@ -198,7 +201,5 @@ async def img_handler(event):
 
 @events.register(events.NewMessage(pattern=r"/today"))
 async def today_handler(event):
-    await event.reply(
-        f"📅 Сейчас: {get_date_time()}"
-    )
+    await event.reply(f"📅 Сегодня: {get_date_time()}")
     raise events.StopPropagation
