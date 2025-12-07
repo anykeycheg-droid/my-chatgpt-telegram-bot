@@ -2,7 +2,7 @@ import os
 import json
 import logging
 import base64
-from typing import List
+from typing import List, Optional
 
 from openai import AsyncOpenAI
 
@@ -30,7 +30,7 @@ os.makedirs(BASE_PATH, exist_ok=True)
 async def start_and_check(
     chat_id: int,
     clear: bool = False,
-    user_text: str = None
+    user_text: Optional[str] = None,
 ):
     filename = os.path.join(BASE_PATH, f"{chat_id}.json")
 
@@ -74,7 +74,6 @@ async def get_openai_response(history: List[dict]) -> str:
             max_tokens=max_token,
             temperature=0.7,
         )
-
         return response.choices[0].message.content.strip()
 
     except Exception:
@@ -87,13 +86,22 @@ async def get_openai_response(history: List[dict]) -> str:
 # =========================
 async def analyze_image_with_gpt(
     image_path: str,
-    user_prompt: str = "Что на изображении?"
-):
+    user_prompt: Optional[str] = None
+) -> str:
+    """
+    Анализ изображения + опциональный текстовый промпт
+    Поддерживает именованный аргумент user_prompt
+    полностью совместим с handlers.py
+    """
 
     try:
         with open(image_path, "rb") as f:
-            image_bytes = f.read()
-            image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+            image_data = base64.b64encode(
+                f.read()
+            ).decode("utf-8")
+
+        if not user_prompt:
+            user_prompt = "Что изображено на фотографии?"
 
         response = await client.chat.completions.create(
             model=model,
@@ -105,7 +113,7 @@ async def analyze_image_with_gpt(
                         {
                             "type": "image_url",
                             "image_url": {
-                                "url": f"data:image/jpeg;base64,{image_b64}"
+                                "url": f"data:image/jpeg;base64,{image_data}"
                             }
                         },
                     ],
@@ -117,7 +125,7 @@ async def analyze_image_with_gpt(
         return response.choices[0].message.content.strip()
 
     except Exception:
-        logging.exception("Vision GPT error")
+        logging.exception("Ошибка анализа изображения")
         return "⚠️ Не удалось распознать изображение."
 
 
@@ -128,21 +136,14 @@ async def process_and_send_mess(event, answer: str):
 
     max_length = 4000
 
-    parts = [
-        answer[i:i + max_length]
-        for i in range(0, len(answer), max_length)
-    ]
-
-    for part in parts:
-        await event.reply(part)
+    for i in range(0, len(answer), max_length):
+        await event.reply(answer[i:i + max_length])
 
     try:
         used_tokens = num_tokens_from_messages(answer)
         tokens_left = max(0, max_token - used_tokens)
 
-        await event.reply(
-            f"\n(осталось {tokens_left} токенов)"
-        )
+        await event.reply(f"\n(осталось {tokens_left} токенов)")
 
     except Exception:
         pass
