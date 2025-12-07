@@ -134,4 +134,33 @@ async def read_existing_conversation(chat_id: int, clear=False):
     if os.path.exists(session_file):
         with open(session_file) as f:
             session_data = json.load(f)
-            session_num = session_data.get(
+
+        session_num = session_data.get("session", 0)
+
+        filename = f"{LOG_PATH}chats/chat_{chat_id}_{session_num}.json"
+
+        if clear:
+            session_num += 1
+
+            with open(session_file, "w") as f:
+                json.dump({"session": session_num}, f)
+
+            filename = f"{LOG_PATH}chats/chat_{chat_id}_{session_num}.json"
+            return session_num, filename, []
+
+        try:
+            with open(filename) as f:
+                history = json.load(f).get("messages", [])
+        except FileNotFoundError:
+            history = []
+
+        return session_num, filename, history
+
+    else:
+        os.makedirs(os.path.dirname(session_file), exist_ok=True)
+
+        with open(session_file, "w") as f:
+            json.dump({"session": 0}, f)
+
+        filename = f"{LOG_PATH}chats/chat_{chat_id}_0.json"
+        return 0, filename, []
