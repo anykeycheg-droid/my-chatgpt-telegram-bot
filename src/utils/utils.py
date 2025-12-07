@@ -1,148 +1,71 @@
 import os
-import json
-import pytz
-import tiktoken
-from datetime import datetime
-from typing import List
+import datetime
 
-
-# =====================
-# BASE PATHS
-# =====================
+# =====================================================
+# Общие настройки
+# =====================================================
 
 LOG_PATH = "logs"
-CHATS_PATH = f"{LOG_PATH}/chats"
-HISTORY_PATH = f"{CHATS_PATH}/history"
-SESSION_PATH = f"{CHATS_PATH}/session"
-MEDIA_PATH = f"{LOG_PATH}/media"
+
+# Модель для OpenAI
+model = "gpt-4.1-mini"
+
+# Максимальный размер ответа
+max_token = 2000
+
+
+# =====================================================
+# Системное сообщение для ChatGPT
+# =====================================================
+
+sys_mess = """
+Ты — помощник для сотрудников сети зоомагазинов «4 ЛАПЫ».
+
+Твои задачи:
+- Помогать по работе магазина.
+- Подсказывать по товарам и сервисам.
+- Помогать с регламентами, обучением и стандартами обслуживания.
+- Отвечать только на русском языке.
+- Текущая дата должна учитываться при ответах.
+
+Стиль общения:
+Дружелюбный, рабочий, с лёгким юмором и подколами, но всегда на результат.
+"""
+
+
+# =====================================================
+# Утилиты
+# =====================================================
+
+def get_date_time() -> str:
+    """Возвращает текущую дату и время."""
+    return datetime.datetime.now().strftime("%d.%m.%Y %H:%M")
 
 
 def create_initial_folders():
     """
-    Create required working directories
+    Создает необходимые папки при старте приложения.
     """
-    for path in [
-        LOG_PATH,
-        CHATS_PATH,
-        HISTORY_PATH,
-        SESSION_PATH,
-        MEDIA_PATH,
-    ]:
-        os.makedirs(path, exist_ok=True)
+    os.makedirs(LOG_PATH, exist_ok=True)
 
 
-create_initial_folders()
-
-
-# =====================
-# GENERAL
-# =====================
-
-BOT_NAME = "Dushnilla"
-
-
-# =====================
-# TIME
-# =====================
-
-def get_date_time(zone: str | None = None) -> str:
-    timezone_name = zone or os.getenv("TIMEZONE", "Europe/Moscow")
+def read_existing_conversation(filename: str) -> list:
+    """
+    Читает историю диалога из файла.
+    """
     try:
-        timezone = pytz.timezone(timezone_name)
-    except Exception:
-        timezone = pytz.timezone("Europe/Moscow")
-
-    return datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S %Z")
-
-
-# =====================
-# TEXT UTILS
-# =====================
-
-def split_text(text: str, limit: int, prefix: str = "", suffix: str = "") -> List[str]:
-    if not text:
-        return [""]
-
-    parts = []
-    buffer = ""
-
-    for line in text.splitlines(True):
-        if len(buffer) + len(line) > limit:
-            parts.append(f"{prefix}{buffer}{suffix}")
-            buffer = line
-        else:
-            buffer += line
-
-    if buffer:
-        parts.append(f"{prefix}{buffer}{suffix}")
-
-    return parts
+        with open(filename, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+            return [{"role": "user", "content": line.strip()} for line in lines]
+    except FileNotFoundError:
+        return []
 
 
-# =====================
-# TOKEN COUNT
-# =====================
-
-def num_tokens_from_messages(messages, model="gpt-4o-mini") -> int:
-    try:
-        encoding = tiktoken.encoding_for_model(model)
-    except KeyError:
-        encoding = tiktoken.get_encoding("cl100k_base")
-
-    tokens_per_message = 3
-    tokens_per_name = 1
-
-    num_tokens = 0
+def num_tokens_from_messages(messages: list) -> int:
+    """
+    Простейшая оценка токенов (примерная).
+    """
+    total = 0
     for msg in messages:
-        num_tokens += tokens_per_message
-        for key, value in msg.items():
-            num_tokens += len(encoding.encode(str(value)))
-            if key == "name":
-                num_tokens += tokens_per_name
-
-    num_tokens += 3
-    return num_tokens
-
-
-# =====================
-# DIALOG HISTORY
-# =====================
-
-async def read_existing_conversation(chat_id: int, clear=False):
-    """
-    Load or initialize session history
-    """
-
-    session_file = f"{SESSION_PATH}/{chat_id}.json"
-
-    if os.path.exists(session_file):
-        with open(session_file, "r", encoding="utf-8") as f:
-            session_data = json.load(f)
-
-        session_num = session_data.get("session", 0)
-        filename = f"{CHATS_PATH}/chat_{chat_id}_{session_num}.json"
-
-        if clear:
-            session_num += 1
-            with open(session_file, "w", encoding="utf-8") as f:
-                json.dump({"session": session_num}, f)
-
-            filename = f"{CHATS_PATH}/chat_{chat_id}_{session_num}.json"
-            return session_num, filename, []
-
-        if os.path.exists(filename):
-            with open(filename, "r", encoding="utf-8") as f:
-                history = json.load(f).get("messages", [])
-        else:
-            history = []
-
-        return session_num, filename, history
-
-    else:
-        os.makedirs(os.path.dirname(session_file), exist_ok=True)
-
-        with open(session_file, "w", encoding="utf-8") as f:
-            json.dump({"session": 0}, f)
-
-        filename = f"{CHATS_PATH}/chat_{chat_id}_0.json"
-        return 0, filename, []
+        total += len(str(msg.get("content", ""))) // 4
+    return total

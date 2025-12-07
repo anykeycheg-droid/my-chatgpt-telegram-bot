@@ -37,7 +37,7 @@ TRIGGERS = [
     "dush",
     "dushik",
     "dushnila",
-    "dushnilla"
+    "dushnilla",
 ]
 
 
@@ -64,10 +64,9 @@ async def universal_handler(event):
                 )
 
                 if not media_bytes:
-                    await event.reply("⚠️ Я получил файл, но не смог его скачать.")
+                    await event.reply("⚠️ Файл получил, но не смог скачать.")
                     return
 
-                # Уведомляем что анализируем
                 await event.reply("👀 Файл получен — анализирую...")
 
                 caption = (event.message.text or "").strip() or None
@@ -79,7 +78,7 @@ async def universal_handler(event):
 
                 await event.reply(answer)
 
-            except Exception as e:
+            except Exception:
                 logging.exception("Ошибка обработки media")
                 await event.reply("❌ Не получилось обработать файл 😔")
 
@@ -96,7 +95,7 @@ async def universal_handler(event):
         text_lower = text.lower()
         is_private = event.is_private
 
-        # Командные хендлеры отдельно
+        # Команды обрабатываются отдельными хендлерами
         if text_lower.startswith((
             "/search",
             "/bash",
@@ -106,9 +105,9 @@ async def universal_handler(event):
         )):
             return
 
-        # В группах отвечаем только по триггеру
         triggered = any(t in text_lower for t in TRIGGERS)
 
+        # В группах отвечаем только если был триггер
         if not is_private and not triggered:
             return
 
@@ -127,7 +126,7 @@ async def universal_handler(event):
             if not cleaned_text:
                 cleaned_text = text
 
-        # Показ индикатора typing
+        # Печатаем "typing"
         await event.client(
             SetTypingRequest(
                 peer=event.chat_id,
@@ -139,23 +138,23 @@ async def universal_handler(event):
         # GPT обработка
         # ============================
 
-        filename, prompt = await start_and_check(
-            event=event,
-            user_text=cleaned_text,
+        filename, history = await start_and_check(
             chat_id=event.chat_id
         )
 
-        gpt_response = get_openai_response(
-            prompt=prompt,
-            filename=filename
-        )
+        history.append({
+            "role": "user",
+            "content": cleaned_text
+        })
+
+        gpt_answer = await get_openai_response(history)
 
         await process_and_send_mess(
             event,
-            gpt_response,
+            gpt_answer,
         )
 
-    except Exception as e:
+    except Exception:
         logging.exception("GLOBAL HANDLER ERROR")
         await event.reply("⚠️ Ой, что-то сломалось… Попробуй ещё раз.")
 
@@ -181,8 +180,6 @@ async def bash_handler(event):
 @events.register(events.NewMessage(pattern=r"/clear"))
 async def clear_handler(event):
     filename, _ = await start_and_check(
-        event=event,
-        user_text="",
         chat_id=event.chat_id,
         clear=True,
     )

@@ -1,153 +1,75 @@
-import base64
+import subprocess
 import logging
-from typing import Optional
 
-from telethon.events import NewMessage
 from openai import OpenAI
+
+from src.utils import model
 
 client = OpenAI()
 
 # =====================================================
-# BASH COMMAND
+# Командная оболочка (bash)
 # =====================================================
 
-async def bash(event: NewMessage) -> None:
+async def bash(command: str) -> str:
     """
-    Техническая команда /bash
+    Выполняет локальную bash-команду.
+    Используется редко — оставляем для совместимости.
     """
-
-    await event.reply(
-        "🔧 Команда /bash активна.\n\n"
-        "Служебная функция для отладки и технических проверок.\n"
-        "Можно расширять под внутренние задачи сотрудников «4 Лапы»."
-    )
-
-
-# =====================================================
-# SEARCH COMMAND (заглушка)
-# =====================================================
-
-async def search(event: NewMessage) -> None:
-    """
-    Команда /search
-
-    Пока работает как умная заглушка.
-    В будущем можно подключить настоящий web-поиск.
-    """
-
-    text = (event.raw_text or "").replace("/search", "").strip()
-
-    if not text:
-        await event.reply(
-            "🔍 Использование:\n"
-            "/search ваш запрос"
-        )
-        return
-
-    await event.reply(
-        "🔎 Поиск временно работает в тестовом режиме.\n\n"
-        f"Ваш запрос:\n<b>{text}</b>\n\n"
-        "⚙ Пока используется только внутренняя база ответов "
-        "и возможности ИИ.\n"
-        "Внешний web-поиск будет подключён позже.",
-        parse_mode="html",
-    )
-
-
-# =====================================================
-# IMAGE ANALYSIS (VISION)
-# =====================================================
-
-async def analyze_image_with_gpt(
-    image_bytes: bytes,
-    question: Optional[str] = None,
-) -> str:
-    """
-    Анализ изображения через GPT Vision
-    """
-
-    if not question:
-        question = (
-            "Опиши подробно, что изображено на картинке. "
-            "Если это товары для животных — перечисли их и дай рекомендации."
-        )
-
     try:
-        img_b64 = base64.b64encode(image_bytes).decode("utf-8")
-
-        completion = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "Ты — ассистент сети зоомагазинов «4 Лапы». "
-                        "Отвечай профессионально, полезно и дружелюбно."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": question},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{img_b64}"
-                            },
-                        },
-                    ],
-                },
-            ],
-            max_tokens=800,
-        )
-
-        return completion.choices[0].message.content.strip()
-
-    except Exception:
-        logging.exception("Ошибка анализа изображения")
-        return "❌ Не удалось распознать изображение. Попробуй прислать другое фото."
+        result = subprocess.check_output(command, shell=True, stderr=subprocess.STDOUT)
+        return result.decode("utf-8")[:4000]
+    except subprocess.CalledProcessError as e:
+        return f"Ошибка команды:\n{e.output.decode('utf-8')[:4000]}"
 
 
 # =====================================================
-# IMAGE GENERATION
+# Заглушка поиска
 # =====================================================
 
-async def generate_image(event: NewMessage) -> None:
+async def search(query: str) -> str:
     """
-    Генерация изображений
-    Команда:
-    /img описание
+    Временная функция-заглушка.
+    Реальный веб-поиск можно подключить позже.
     """
+    return f"🔎 Поиск по запросу: «{query}» пока не подключён."
 
-    text = (event.raw_text or "").strip()
-    parts = text.split(" ", maxsplit=1)
 
-    if len(parts) < 2 or not parts[1].strip():
-        await event.reply(
-            "ℹ Используй команду так:\n"
-            "/img описание картинки"
-        )
-        return
+# =====================================================
+# Генерация изображений
+# =====================================================
 
-    prompt = parts[1].strip()
-
+async def generate_image(prompt: str) -> str:
     try:
-        image = client.images.generate(
+        result = client.images.generate(
             model="gpt-image-1",
             prompt=prompt,
-            size="1024x1024",
+            size="1024x1024"
         )
+        return result.data[0].url
+    except Exception as e:
+        logging.error(f"Image generation error: {e}")
+        return "Ошибка генерации изображения."
 
-        image_url = image.data[0].url
 
-        await event.client.send_file(
-            event.chat_id,
-            image_url,
-            caption=f"🎨 Сгенерировано по запросу:\n{prompt}",
+# =====================================================
+# Анализ изображений
+# =====================================================
+
+async def analyze_image_with_gpt(image_bytes: bytes, caption: str | None = None) -> str:
+    try:
+        text = caption or "Опиши, что изображено на картинке."
+
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "Ты помощник для сотрудников сети зоомагазинов «4 лапы»."},
+                {"role": "user", "content": text},
+            ],
+            max_tokens=500
         )
+        return response.choices[0].message.content
 
-    except Exception:
-        logging.exception("Ошибка генерации картинки")
-        await event.reply(
-            "❌ Не получилось сгенерировать изображение 😔"
-        )
+    except Exception as e:
+        logging.error(f"Vision analyze error: {e}")
+        return "Ошибка анализа изображения."

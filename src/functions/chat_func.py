@@ -1,124 +1,93 @@
 import logging
-import datetime
+from datetime import datetime
 
-from openai import OpenAI
-from telethon.events import NewMessage
+from openai import OpenAI, APIError, RateLimitError, APIConnectionError
 
 from src.utils import (
-    model,
-    max_token,
-    sys_mess,
+    LOG_PATH,
     read_existing_conversation,
-    save_dialogue,
+    num_tokens_from_messages,
 )
+
+# =====================
+# OPENAI CONFIG
+# =====================
+
+# Модель
+MODEL = "gpt-4o-mini"
+
+# Максимум токенов в истории
+MAX_TOKENS = 12000
+
+# Системное сообщение
+SYSTEM_MESSAGE = (
+    "Ты — помощник для сотрудников сети зоомагазинов «Четыре Лапы».\n"
+    "Говоришь строго на русском языке.\n"
+    "Ты дружелюбный, понятный и немного с юмором.\n"
+    "Всегда стараешься помогать максимально практично и по делу.\n\n"
+    "Ты знаешь сегодняшнюю дату: "
+    + datetime.now().strftime("%d.%m.%Y")
+)
+
+# =====================
+# CLIENT
+# =====================
 
 client = OpenAI()
 
 
-# ======================================================
-# START / CHECK FUNCTION
-# ======================================================
+# =====================
+# CORE FUNCTIONS
+# =====================
 
-async def start_and_check(
-    event: NewMessage,
-    user_text: str = ""
-):
+async def start_and_check(chat_id: int, clear: bool = False):
     """
-    Предобработка входящего сообщения
+    Загружает или очищает историю чата
     """
-
-    filename = f"dialog_{event.sender_id}.json"
-
-    if not user_text:
-        user_text = event.raw_text or ""
-
-    return filename, user_text.strip()
-
-
-# ======================================================
-# CORE AI RESPONSE FUNCTION
-# ======================================================
-
-async def get_openai_response(
-    prompt: str,
-    filename: str,
-) -> str:
-    """
-    Запрос к OpenAI (основной ответ бота)
-    """
-
-    today = datetime.datetime.now().strftime("%d.%m.%Y")
-
-    conversation = read_existing_conversation(filename)
-
-    # Системное сообщение (роль бота)
-    system_prompt = (
-        f"{sys_mess}\n\n"
-        f"Сегодняшняя дата: {today}.\n"
-        "Ты помощник сотрудников сети зоомагазинов «4 лапы».\n"
-        "Отвечай всегда на русском.\n"
-        "Манера общения — дружелюбная, результативная, "
-        "иногда с лёгкими шутками или подколами.\n"
-        "Ты помогаешь в работе: товар, клиенты, инструкции, стандарты сервиса.\n"
+    session_num, filename, history = await read_existing_conversation(
+        chat_id=chat_id,
+        clear=clear
     )
+    return filename, history
 
-    messages = [
-        {"role": "system", "content": system_prompt}
-    ]
 
-    for msg in conversation:
-        messages.append(
-            {
-                "role": msg["role"],
-                "content": str(msg["content"]),
-            }
-        )
-
-    messages.append(
-        {"role": "user", "content": prompt}
-    )
+async def get_openai_response(messages: list[dict]) -> str:
+    """
+    Отправка запроса в OpenAI и получение ответа
+    """
 
     try:
+        messages_with_system = [
+            {"role": "system", "content": SYSTEM_MESSAGE},
+            *messages
+        ]
+
+        # Контроль чрезмерной истории
+        tokens = num_tokens_from_messages(messages_with_system, MODEL)
+        if tokens > MAX_TOKENS:
+            messages_with_system = messages_with_system[-20:]
+
         response = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            max_tokens=max_token,
+            model=MODEL,
+            messages=messages_with_system,
+            temperature=0.7,
         )
 
-        answer = response.choices[0].message.content.strip()
+        text = response.choices[0].message.content.strip()
+        return text
 
-        save_dialogue(
-            filename=filename,
-            user_message=prompt,
-            assistant_message=answer,
-        )
+    except RateLimitError:
+        logging.error("OpenAI RateLimit")
+        return "Слишком много запросов к ИИ. Немного подожди и попробуй ещё раз."
 
-        return answer
+    except APIConnectionError:
+        logging.error("OpenAI Connection error")
+        return "Не удалось подключиться к сервису ИИ. Попробуй немного позже."
 
-    except Exception as err:
-        logging.error(f"OpenAI API error: {err}")
-        return (
-            "⚡ Сейчас сервис ИИ временно недоступен.\n"
-            "Попробуй чуть позже — я скоро вернусь в строй 😉"
-        )
+    except APIError as e:
+        logging.error(f"OpenAI API error: {e}")
+        return "Произошла ошибка при работе с ИИ."
 
-
-# ======================================================
-# FULL MESSAGE PIPELINE
-# ======================================================
-
-async def process_and_send_mess(
-    event: NewMessage,
-    filename: str,
-    prompt: str,
-):
-    """
-    Полный цикл обработки сообщения и ответа пользователю
-    """
-
-    answer = await get_openai_response(
-        prompt=prompt,
-        filename=filename,
-    )
-
-    await event.respond(answer)
+    except Exception as e:
+        logging.exception("Unexpected error while calling OpenAI")
+        return "Что-то пошло не так при обращении к ИИ."
