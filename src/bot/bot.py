@@ -6,14 +6,14 @@ from dotenv import load_dotenv
 from telethon import TelegramClient
 from telethon.errors.rpcerrorlist import UnauthorizedError
 
-from src.handlers.handlers import (
+from handlers.handlers import (
     universal_handler,
     search_handler,
     bash_handler,
     clear_handler,
 )
 
-from src.utils import create_initial_folders
+from utils import create_initial_folders
 
 # ======================
 # SETTINGS

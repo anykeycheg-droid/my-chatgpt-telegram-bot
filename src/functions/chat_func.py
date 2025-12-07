@@ -8,7 +8,7 @@ from typing import List, Tuple, Optional
 from openai import OpenAI
 from telethon.events import NewMessage
 
-from src.utils import (
+from utils import (
     LOG_PATH,
     model,
     max_token,

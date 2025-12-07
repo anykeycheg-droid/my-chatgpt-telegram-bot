@@ -3,7 +3,7 @@ import logging
 
 from openai import OpenAI
 
-from src.utils import model
+from utils import model
 
 client = OpenAI()
 

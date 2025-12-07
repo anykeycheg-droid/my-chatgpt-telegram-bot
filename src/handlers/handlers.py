@@ -5,20 +5,20 @@ from telethon import events
 from telethon.tl.functions.messages import SetTypingRequest
 from telethon.tl.types import SendMessageTypingAction
 
-from src.functions.additional_func import (
+from functions.additional_func import (
     bash,
     search,
     generate_image,
     analyze_image_with_gpt,
 )
 
-from src.functions.chat_func import (
+from functions.chat_func import (
     process_and_send_mess,
     start_and_check,
     get_openai_response,
 )
 
-from src.utils import get_date_time
+from utils import get_date_time
 
 
 # =======================
