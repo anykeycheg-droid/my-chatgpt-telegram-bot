@@ -15,7 +15,6 @@ from src.utils import (
     num_tokens_from_messages,
 )
 
-# Init OpenAI client
 client = OpenAI()
 
 Prompt = List[dict]
@@ -62,7 +61,6 @@ async def over_token(
     prompt: Prompt,
     filename: str,
 ):
-
     try:
         await event.reply(
             f"Диалог стал слишком длинным ({num_tokens} токенов). Начинаю новый 🙂"
@@ -113,7 +111,6 @@ async def get_openai_response(prompt: Prompt, filename: str) -> str:
 
             message = completion.choices[0].message
 
-            # ✅ Сериализуем ТОЛЬКО dict, а не объект SDK
             prompt.append({
                 "role": message.role,
                 "content": message.content,
@@ -127,10 +124,7 @@ async def get_openai_response(prompt: Prompt, filename: str) -> str:
                     indent=2
                 )
 
-            used = completion.usage.total_tokens
-            remain = max(0, max_token - used)
-
-            return f"{message.content.strip()}\n\n_(осталось {remain} токенов)_"
+            return message.content.strip()
 
         except Exception as e:
             logging.error(f"OpenAI error ({attempt}/5): {e}")
