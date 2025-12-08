@@ -1,1 +1,2 @@
-from .utils import *
+# Пустой init
+# Утилиты импортируются напрямую из src.utils.utils

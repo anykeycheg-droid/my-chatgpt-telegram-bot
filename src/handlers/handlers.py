@@ -17,7 +17,7 @@ from src.functions.chat_func import (
     get_openai_response,
 )
 
-from src.utils import get_date_time
+from src.utils.utils import get_date_time
 
 
 # =====================================================

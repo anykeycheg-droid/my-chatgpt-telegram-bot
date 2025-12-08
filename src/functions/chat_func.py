@@ -6,7 +6,7 @@ from typing import List, Tuple
 from openai import OpenAI
 from telethon.events import NewMessage
 
-from src.utils import (
+from src.utils.utils import (
     model,
     max_token,
     read_existing_conversation,

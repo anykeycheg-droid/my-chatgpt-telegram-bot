@@ -3,7 +3,7 @@ import logging
 
 from openai import OpenAI
 
-from src.utils import model, sys_mess
+from src.utils.utils import model, sys_mess   # ✅ ПРАВИЛЬНЫЙ ИМПОРТ
 
 client = OpenAI()
 
@@ -13,20 +13,16 @@ client = OpenAI()
 # ==============================
 
 async def search(query: str) -> str:
-    """Поиск информации для команд /search, /поиск и текстовых триггеров.
+    """Поиск информации для команд /search, /поиск и текстовых триггеров."""
 
-    Делает разумный краткий ответ по-русски в тональности бренда
-    «Четыре Лапы — и не только».
-    """
     query = (query or "").strip()
     if not query:
         return "❌ Пожалуйста, укажи запрос для поиска."
 
     system_prompt = (
-        "Ты — внимательный ассистент сети зоомагазинов «Четыре Лапы», и не только. "
-        "Отвечай всегда по-русски, дружелюбно и по делу. Если вопрос связан с животными, "
-        "зоотоварами или уходом, опирайся на экспертизу бренда, приглашай в магазиы «Четыре Лапы», консультанты всегда помогут. "
-        "Если тема другая, всё равно помоги, и переставай напоминать про «Четыре Лапы». "
+        "Ты — внимательный ассистент сети зоомагазинов «Четыре Лапы — и не только». "
+        "Отвечай всегда по-русски, дружелюбно и по делу. "
+        "Если вопрос связан с животными, используй экспертизу бренда."
     )
 
     try:
@@ -34,17 +30,13 @@ async def search(query: str) -> str:
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {
-                    "role": "user",
-                    "content": (
-                        f"Найди актуальную информацию в интернете и кратко ответь на запрос: {query}"
-                    ),
-                },
+                {"role": "user", "content": f"Найди информацию и кратко ответь: {query}"},
             ],
             max_tokens=800,
             temperature=0.3,
         )
         return completion.choices[0].message.content.strip()
+
     except Exception as e:
         logging.exception("SEARCH ERROR")
         return f"❌ Ошибка поиска: {e}"
@@ -55,15 +47,12 @@ async def search(query: str) -> str:
 # ==============================
 
 async def generate_image(prompt: str) -> bytes:
-    """Генерация изображения через OpenAI Images API.
+    """Генерация изображения через OpenAI Images API"""
 
-    Возвращает байты PNG, которые можно сразу отправлять в Telethon:
-    await event.respond(file=image_bytes, ...)
-    """
     if not prompt:
         prompt = (
             "Милое домашнее животное в фирменном стиле сети зоомагазинов "
-            "«Четыре Лапы — и не только», яркие дружелюбные цвета, позитивное настроение"
+            "«Четыре Лапы — и не только»"
         )
 
     try:
@@ -79,7 +68,6 @@ async def generate_image(prompt: str) -> bytes:
 
     except Exception as e:
         logging.exception("IMAGE GENERATION ERROR")
-        # Пробрасываем ошибку выше, чтобы хендлер /img показал аккуратное сообщение
         raise
 
 
@@ -87,11 +75,9 @@ async def generate_image(prompt: str) -> bytes:
 # IMAGE ANALYSIS (VISION)
 # ==============================
 
-async def analyze_image_with_gpt(
-    image_bytes: bytes,
-    user_prompt: str | None = None,
-) -> str:
-    """Анализ изображения с помощью GPT-Vision."""
+async def analyze_image_with_gpt(image_bytes: bytes, user_prompt: str | None = None) -> str:
+    """Анализ изображений GPT-Vision"""
+
     try:
         prompt = user_prompt or "Опиши, что изображено на картинке."
 
