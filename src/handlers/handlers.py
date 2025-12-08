@@ -110,8 +110,21 @@ async def clear_handler(event):
 
 @events.register(events.NewMessage(pattern=r"/img"))
 async def img_handler(event):
-    await event.reply(await generate_image(event.raw_text.replace("/img", "").strip()))
-    raise events.StopPropagation
+    try:
+        prompt = (event.raw_text or "").replace("/img", "").strip()
+
+        image_url = await generate_image(prompt)
+
+        await event.respond(
+            file=image_url,
+            caption=f"🖼 Сгенерировано по запросу:\n{prompt}"
+        )
+
+        raise events.StopPropagation
+
+    except Exception as e:
+        logging.exception("IMG ERROR")
+        await event.reply("❌ Не удалось создать изображение.")
 
 
 @events.register(events.NewMessage(pattern=r"/today"))
