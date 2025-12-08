@@ -1,145 +1,123 @@
-import json
+import subprocess
 import logging
-import time
-from typing import List, Tuple
+import base64
 
 from openai import OpenAI
-from telethon.events import NewMessage
 
-from src.utils import (
-    LOG_PATH,
-    model,
-    max_token,
-    sys_mess,
-    read_existing_conversation,
-    num_tokens_from_messages,
-)
+from src.utils import model, sys_mess
 
 client = OpenAI()
 
-Prompt = List[dict]
+# =====================================================
+# Командная оболочка (bash)
+# =====================================================
 
-
-# ==============================
-# CHAT FLOW
-# ==============================
-
-async def start_and_check(
-    event: NewMessage,
-    message: str,
-    chat_id: int,
-) -> Tuple[str, Prompt]:
-
-    session, filename, prompt = read_existing_conversation(str(chat_id))
-
-    prompt.append({
-        "role": "user",
-        "content": message
-    })
-
-    tokens = num_tokens_from_messages(prompt)
-
-    if tokens > max_token - 500:
-        await over_token(tokens, event, prompt, filename)
-
-        session, filename, prompt = read_existing_conversation(str(chat_id))
-        prompt.append({
-            "role": "user",
-            "content": message
-        })
-
-    return filename, prompt
-
-
-# ==============================
-# TOKEN OVERFLOW
-# ==============================
-
-async def over_token(
-    num_tokens: int,
-    event: NewMessage,
-    prompt: Prompt,
-    filename: str,
-):
+async def bash(command: str) -> str:
     try:
-        await event.reply(
-            f"Диалог стал слишком длинным ({num_tokens} токенов). Начинаю новый 🙂"
+        if not command:
+            return "❌ Команда не указана."
+
+        result = subprocess.check_output(
+            command,
+            shell=True,
+            stderr=subprocess.STDOUT
+        )
+        return result.decode("utf-8")[:4000]
+
+    except subprocess.CalledProcessError as e:
+        return f"Ошибка команды:\n{e.output.decode('utf-8')[:4000]}"
+
+
+# =====================================================
+# ✅ REAL INTERNET SEARCH
+# =====================================================
+
+async def search(query: str) -> str:
+    """
+    Настоящий live-поиск в интернете через OpenAI web_search.
+    """
+    try:
+        if not query:
+            return "Введите запрос для поиска."
+
+        response = client.responses.create(
+            model="gpt-4.1-mini",
+            tools=[{"type": "web_search"}],
+            input=f"Найди актуальную информацию в интернете и ответь максимально точно:\n{query}",
+            max_output_tokens=700,
+            temperature=0.2
         )
 
-        completion = client.chat.completions.create(
+        text = response.output_text.strip()
+
+        if not text:
+            return "🔎 Не удалось получить результат поиска."
+
+        return text
+
+    except Exception as e:
+        logging.error(f"Web search error: {e}")
+        return "❌ Ошибка поиска. Попробуй позже."
+
+
+# =====================================================
+# IMAGE GENERATION
+# =====================================================
+
+async def generate_image(prompt: str) -> str:
+    try:
+        if not prompt:
+            prompt = "Милое домашнее животное, дружелюбный стиль"
+
+        result = client.images.generate(
+            model="gpt-image-1",
+            prompt=prompt,
+            size="1024x1024"
+        )
+
+        return result.data[0].url
+
+    except Exception as e:
+        logging.error(f"Image generation error: {e}")
+        return "❌ Ошибка генерации изображения."
+
+
+# =====================================================
+# IMAGE ANALYSIS (VISION)
+# =====================================================
+
+async def analyze_image_with_gpt(
+    image_bytes: bytes,
+    user_prompt: str | None = None
+) -> str:
+    try:
+        prompt = user_prompt or "Опиши, что изображено на изображении."
+
+        image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+
+        response = client.chat.completions.create(
             model=model,
-            messages=prompt,
-            max_tokens=300,
+            messages=[
+                {"role": "system", "content": sys_mess},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{image_b64}"
+                            },
+                        },
+                    ]
+                }
+            ],
+            max_tokens=500,
             temperature=0.2,
         )
 
-        summary = completion.choices[0].message.content
-
-        new_prompt = [
-            {
-                "role": "system",
-                "content": f"Резюме прошлого диалога: {summary}",
-            }
-        ]
-
-        with open(filename, "w", encoding="utf-8") as f:
-            json.dump(
-                {"session": 0, "messages": new_prompt},
-                f,
-                ensure_ascii=False,
-                indent=2
-            )
+        return response.choices[0].message.content.strip()
 
     except Exception as e:
-        logging.error(f"Ошибка обрезки диалога: {e}")
-
-
-# ==============================
-# OPENAI RESPONSE
-# ==============================
-
-async def get_openai_response(prompt: Prompt, filename: str) -> str:
-
-    for attempt in range(1, 6):
-        try:
-            completion = client.chat.completions.create(
-                model=model,
-                messages=prompt,
-                max_tokens=1500,
-                temperature=0.6,
-            )
-
-            message = completion.choices[0].message
-
-            prompt.append({
-                "role": message.role,
-                "content": message.content,
-            })
-
-            with open(filename, "w", encoding="utf-8") as f:
-                json.dump(
-                    {"messages": prompt},
-                    f,
-                    ensure_ascii=False,
-                    indent=2
-                )
-
-            return message.content.strip()
-
-        except Exception as e:
-            logging.error(f"OpenAI error ({attempt}/5): {e}")
-            time.sleep(2)
-
-    return "⚠️ OpenAI временно недоступен. Попробуй позже."
-
-
-# ==============================
-# TELEGRAM OUTPUT
-# ==============================
-
-async def process_and_send_mess(event, answer: str):
-
-    max_length = 4000
-
-    for i in range(0, len(answer), max_length):
-        await event.reply(answer[i:i + max_length])
+        logging.error(f"Vision analyze error: {e}")
+        return "❌ Ошибка распознавания изображения."
