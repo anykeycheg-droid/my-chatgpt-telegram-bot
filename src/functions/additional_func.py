@@ -3,7 +3,8 @@ import logging
 
 from openai import OpenAI
 
-from src.utils.utils import model, sys_mess   # ✅ ПРАВИЛЬНЫЙ ИМПОРТ
+from src.utils.utils import model, sys_mess
+
 
 client = OpenAI()
 
@@ -35,6 +36,7 @@ async def search(query: str) -> str:
             max_tokens=800,
             temperature=0.3,
         )
+
         return completion.choices[0].message.content.strip()
 
     except Exception as e:
@@ -47,7 +49,9 @@ async def search(query: str) -> str:
 # ==============================
 
 async def generate_image(prompt: str) -> bytes:
-    """Генерация изображения через OpenAI Images API"""
+    """Генерация изображения через OpenAI Images API.
+    Возвращает байты PNG.
+    """
 
     if not prompt:
         prompt = (
@@ -59,8 +63,8 @@ async def generate_image(prompt: str) -> bytes:
         result = client.images.generate(
             model="gpt-image-1",
             prompt=prompt,
-            size="1024x1024",
-            response_format="b64_json",
+            size="1024x1024"
+            # ⚠️ response_format УБРАН — это главный фикс
         )
 
         image_b64 = result.data[0].b64_json
@@ -75,8 +79,11 @@ async def generate_image(prompt: str) -> bytes:
 # IMAGE ANALYSIS (VISION)
 # ==============================
 
-async def analyze_image_with_gpt(image_bytes: bytes, user_prompt: str | None = None) -> str:
-    """Анализ изображений GPT-Vision"""
+async def analyze_image_with_gpt(
+    image_bytes: bytes,
+    user_prompt: str | None = None
+) -> str:
+    """Анализ изображений GPT Vision"""
 
     try:
         prompt = user_prompt or "Опиши, что изображено на картинке."
