@@ -1,67 +1,17 @@
-import subprocess
-import logging
 import base64
-
+import httpx
 from openai import OpenAI
 
 from src.utils import model, sys_mess
 
 client = OpenAI()
 
-# =====================================================
-# Bash
-# =====================================================
 
-async def bash(command: str) -> str:
-    try:
-        if not command:
-            return "❌ Команда не указана."
+# ==============================
+# IMAGE GENERATION
+# ==============================
 
-        result = subprocess.check_output(
-            command,
-            shell=True,
-            stderr=subprocess.STDOUT
-        )
-        return result.decode("utf-8")[:4000]
-
-    except subprocess.CalledProcessError as e:
-        return f"Ошибка команды:\n{e.output.decode('utf-8')[:4000]}"
-
-
-# =====================================================
-# ✅ REAL INTERNET SEARCH
-# =====================================================
-
-async def search(query: str) -> str:
-    try:
-        if not query:
-            return "Введите запрос для поиска."
-
-        response = client.responses.create(
-            model="gpt-4.1-mini",
-            tools=[{"type": "web_search"}],
-            input=f"Найди актуальную информацию в интернете и ответь максимально точно:\n{query}",
-            max_output_tokens=700,
-            temperature=0.2,
-        )
-
-        text = response.output_text.strip()
-
-        if not text:
-            return "🔎 Ничего не найдено."
-
-        return text
-
-    except Exception as e:
-        logging.error(f"Web search error: {e}")
-        return "❌ Ошибка поиска. Попробуй позже."
-
-
-# =====================================================
-# Image generation
-# =====================================================
-
-async def generate_image(prompt: str) -> str:
+async def generate_image(prompt: str) -> bytes:
     try:
         if not prompt:
             prompt = "Милое домашнее животное, дружелюбный стиль"
@@ -72,23 +22,28 @@ async def generate_image(prompt: str) -> str:
             size="1024x1024"
         )
 
-        return result.data[0].url
+        url = result.data[0].url
+
+        async with httpx.AsyncClient() as http:
+            response = await http.get(url)
+            response.raise_for_status()
+
+            return response.content  # BYTES !!!
 
     except Exception as e:
-        logging.error(f"Image gen error: {e}")
-        return "❌ Ошибка генерации изображения."
+        return f"❌ Ошибка генерации изображения: {e}"
 
 
-# =====================================================
-# Vision
-# =====================================================
+# ==============================
+# IMAGE ANALYSIS (VISION)
+# ==============================
 
 async def analyze_image_with_gpt(
     image_bytes: bytes,
     user_prompt: str | None = None
 ) -> str:
     try:
-        prompt = user_prompt or "Опиши, что изображено на изображении."
+        prompt = user_prompt or "Опиши, что изображено на картинке."
 
         image_b64 = base64.b64encode(image_bytes).decode("utf-8")
 
@@ -110,11 +65,9 @@ async def analyze_image_with_gpt(
                 },
             ],
             max_tokens=500,
-            temperature=0.2,
         )
 
-        return response.choices[0].message.content.strip()
+        return response.choices[0].message.content
 
     except Exception as e:
-        logging.error(f"Vision error: {e}")
-        return "❌ Ошибка распознавания изображения."
+        return f"❌ Ошибка анализа изображения: {e}"
