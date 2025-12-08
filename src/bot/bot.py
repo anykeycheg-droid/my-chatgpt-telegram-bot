@@ -9,7 +9,6 @@ from telethon.errors.rpcerrorlist import UnauthorizedError
 from src.handlers.handlers import (
     universal_handler,
     search_handler,
-    bash_handler,
     clear_handler,
 )
 
@@ -62,7 +61,7 @@ async def bot() -> None:
 
             await client.start(bot_token=bot_token)
 
-            logging.info("🐾 Душнилла онлайн — ассистент сети «Четыре Лапы» готов к работе!")
+            logging.info("🐾 Ассистент сети «Четыре Лапы — и не только» запущен!")
 
             # ===============
             # Handlers
@@ -70,16 +69,20 @@ async def bot() -> None:
 
             client.add_event_handler(universal_handler)
             client.add_event_handler(search_handler)
-            client.add_event_handler(bash_handler)
             client.add_event_handler(clear_handler)
 
             # run until disconnect
             await client.run_until_disconnected()
 
         except UnauthorizedError:
-            logging.critical("❌ Telegram отказал в доступе. Проверь BOTTOKEN / API_ID / API_HASH")
+            logging.critical(
+                "❌ Telegram отказал в доступе. "
+                "Проверь BOTTOKEN / API_ID / API_HASH"
+            )
             break
 
         except Exception as e:
-            logging.exception(f"⚠ Критическая ошибка bot loop: {e}")
+            logging.exception(
+                f"⚠ Критическая ошибка bot loop: {e}"
+            )
             await asyncio.sleep(10)
