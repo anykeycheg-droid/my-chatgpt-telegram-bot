@@ -140,11 +140,11 @@ async def clear_handler(event):
 async def img_handler(event):
     try:
         prompt = event.raw_text.replace("/img", "").strip()
-        image_url = await generate_image(prompt)
+        image_bytes = await generate_image(prompt)
 
         await event.respond(
-            file=image_url,
-            caption=f"🖼 Сгенерировано по запросу:\n{prompt}",
+            file=image_bytes,  # отправляем КАК BYTES
+            caption=f"🖼 Сгенерировано по запросу:\n{prompt or 'по умолчанию'}",
         )
 
         raise events.StopPropagation
