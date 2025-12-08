@@ -6,7 +6,6 @@ from telethon.tl.functions.messages import SetTypingRequest
 from telethon.tl.types import SendMessageTypingAction
 
 from src.functions.additional_func import (
-    bash,
     search,
     generate_image,
     analyze_image_with_gpt,
@@ -56,7 +55,6 @@ HELP_TEXT = """
 /img <описание> — генерация изображения
 /today — текущая дата
 /clear — очистка истории
-/bash <cmd> — shell-команда
 /help — справка
 
 В группах можно писать:
@@ -116,14 +114,6 @@ async def search_handler(event):
     raise events.StopPropagation
 
 
-@events.register(events.NewMessage(pattern=r"/bash"))
-async def bash_handler(event):
-    await event.reply(
-        await bash(event.raw_text.replace("/bash", "").strip())
-    )
-    raise events.StopPropagation
-
-
 @events.register(events.NewMessage(pattern=r"/clear"))
 async def clear_handler(event):
     await start_and_check(
@@ -143,7 +133,7 @@ async def img_handler(event):
         image_bytes = await generate_image(prompt)
 
         await event.respond(
-            file=image_bytes,  # отправляем КАК BYTES
+            file=image_bytes,
             caption=f"🖼 Сгенерировано по запросу:\n{prompt or 'по умолчанию'}",
         )
 
@@ -169,15 +159,19 @@ async def today_handler(event):
 
 @events.register(events.NewMessage)
 async def universal_handler(event):
-
     try:
-        # 🚨 САМАЯ ВАЖНАЯ ПРАВКА:
-        # НЕ отвечаем на собственные сообщения
+        # Не отвечаем на собственные сообщения
         if event.out:
             return
 
+        # Команды (/search, /img, /clear, /today, /start, /help и т.д.)
+        # обрабатываются отдельными хендлерами выше — здесь их игнорируем,
+        # чтобы не было двойных ответов.
+        if event.raw_text and event.raw_text.startswith("/"):
+            return
+
         # =============================
-        # MEDIA
+        # MEDIA (VISION)
         # =============================
 
         if event.message.media:
@@ -200,7 +194,6 @@ async def universal_handler(event):
         # =============================
 
         text = (event.raw_text or "").strip()
-
         if not text:
             return
 
@@ -213,7 +206,7 @@ async def universal_handler(event):
                 await event.reply(await search(query))
                 raise events.StopPropagation
 
-        # -------- triggers ----------
+        # -------- triggers в группах ----------
         if not event.is_private and not any(t in text_lower for t in TRIGGERS):
             return
 
