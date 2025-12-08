@@ -47,7 +47,7 @@ SEARCH_TRIGGERS = [
 
 
 HELP_TEXT = """
-🤖 Ассистент сети зоомагазинов «Четыре Лапы» — и не только!
+🤖 Ассистент сети зоомагазинов «Четыре Лапы»  и не только! 🐾
 
 Команды:
 /search <запрос> — поиск в интернете
@@ -62,7 +62,9 @@ HELP_TEXT = """
 или
 «поиск …»
 
-👨‍💼 Вопросы:
+ℹ️ Просто напишите «помощь» — и я подскажу, что умею.
+
+👨‍💼 Контакт:
 Дмитрий Лесных — @anykeycheg
 """
 
@@ -110,7 +112,6 @@ async def search_handler(event):
     ).strip()
 
     await event.reply(await search(query))
-
     raise events.StopPropagation
 
 
@@ -128,21 +129,27 @@ async def clear_handler(event):
 
 @events.register(events.NewMessage(pattern=r"/img"))
 async def img_handler(event):
+    if event.out:
+        return
+
     try:
         prompt = event.raw_text.replace("/img", "").strip()
+
+        if not prompt:
+            await event.respond("Пожалуйста, укажите описание изображения после команды /img")
+            return
+
         image_bytes = await generate_image(prompt)
 
         await event.respond(
-            file=image_bytes,
-            caption=f"🖼 Сгенерировано по запросу:\n{prompt or 'по умолчанию'}",
+            message=f"🖼 Генерация по запросу:\n{prompt}",
+            file=image_bytes
         )
 
-        raise events.StopPropagation
+    except Exception as e:
+        logging.error("IMG ERROR", exc_info=True)
+        await event.respond("❌ Не удалось создать изображение.")
 
-    except Exception:
-        logging.exception("IMG ERROR")
-        await event.reply("❌ Не удалось создать изображение.")
-        return
 
 
 @events.register(events.NewMessage(pattern=r"/today"))
@@ -160,13 +167,10 @@ async def today_handler(event):
 @events.register(events.NewMessage)
 async def universal_handler(event):
     try:
-        # Не отвечаем на собственные сообщения
         if event.out:
             return
 
-        # Команды (/search, /img, /clear, /today, /start, /help и т.д.)
-        # обрабатываются отдельными хендлерами выше — здесь их игнорируем,
-        # чтобы не было двойных ответов.
+        # игнор команд — чтобы не было дублей
         if event.raw_text and event.raw_text.startswith("/"):
             return
 
@@ -186,7 +190,6 @@ async def universal_handler(event):
             )
 
             await event.reply(answer)
-
             raise events.StopPropagation
 
         # =============================
@@ -199,14 +202,23 @@ async def universal_handler(event):
 
         text_lower = text.lower()
 
-        # -------- search by phrase ----------
+        # -------- help trigger ----------
+        if text_lower == "помощь" or " помощь" in text_lower:
+            await event.reply(
+                HELP_TEXT,
+                buttons=help_keyboard(),
+                link_preview=False,
+            )
+            raise events.StopPropagation
+
+        # -------- search trigger ----------
         for phrase in SEARCH_TRIGGERS:
             if phrase in text_lower:
                 query = text_lower.replace(phrase, "").strip()
                 await event.reply(await search(query))
                 raise events.StopPropagation
 
-        # -------- triggers в группах ----------
+        # -------- group trigger ----------
         if not event.is_private and not any(t in text_lower for t in TRIGGERS):
             return
 
