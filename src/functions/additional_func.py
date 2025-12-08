@@ -9,13 +9,10 @@ from src.utils import model, sys_mess
 client = OpenAI()
 
 # =====================================================
-# Командная оболочка (bash)
+# Bash
 # =====================================================
 
 async def bash(command: str) -> str:
-    """
-    Выполняет локальную bash-команду.
-    """
     try:
         if not command:
             return "❌ Команда не указана."
@@ -32,27 +29,38 @@ async def bash(command: str) -> str:
 
 
 # =====================================================
-# Заглушка поиска
+# ✅ REAL INTERNET SEARCH (LIVE)
 # =====================================================
 
 async def search(query: str) -> str:
-    """
-    Временная функция поиска-заглушка.
-    """
-    if not query:
-        return "Введите текст запроса для поиска."
+    try:
+        if not query:
+            return "Введите запрос для поиска."
 
-    return f"🔎 Поиск по запросу «{query}» пока не подключён."
+        response = client.responses.create(
+            model="gpt-4.1-mini",
+            tools=[{"type": "web_search"}],
+            input=f"Найди актуальную информацию в интернете и ответь максимально точно:\n{query}",
+            max_output_tokens=700,
+            temperature=0.2,
+        )
+
+        text = response.output_text.strip()
+        if not text:
+            return "🔎 Результаты не найдены."
+
+        return text
+
+    except Exception as e:
+        logging.error(f"Web search error: {e}")
+        return "❌ Ошибка поиска. Попробуйте позже."
 
 
 # =====================================================
-# Генерация изображений
+# IMAGE GENERATION
 # =====================================================
 
 async def generate_image(prompt: str) -> str:
-    """
-    Генерирует изображение через OpenAI Images API.
-    """
     try:
         if not prompt:
             prompt = "Милое домашнее животное, дружелюбный стиль"
@@ -66,21 +74,15 @@ async def generate_image(prompt: str) -> str:
         return result.data[0].url
 
     except Exception as e:
-        logging.error(f"Image generation error: {e}")
+        logging.error(f"Image gen error: {e}")
         return "❌ Ошибка генерации изображения."
 
 
 # =====================================================
-# Анализ изображений
+# IMAGE ANALYSIS (VISION)
 # =====================================================
 
-async def analyze_image_with_gpt(
-    image_bytes: bytes,
-    user_prompt: str | None = None
-) -> str:
-    """
-    GPT-Vision анализ изображения.
-    """
+async def analyze_image_with_gpt(image_bytes: bytes, user_prompt: str | None = None) -> str:
     try:
         prompt = user_prompt or "Опиши, что изображено на изображении."
 
@@ -96,12 +98,10 @@ async def analyze_image_with_gpt(
                         {"type": "text", "text": prompt},
                         {
                             "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{image_b64}"
-                            },
+                            "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"},
                         },
-                    ]
-                }
+                    ],
+                },
             ],
             max_tokens=500,
             temperature=0.2,
@@ -110,5 +110,5 @@ async def analyze_image_with_gpt(
         return response.choices[0].message.content.strip()
 
     except Exception as e:
-        logging.error(f"Vision analyze error: {e}")
+        logging.error(f"Vision error: {e}")
         return "❌ Ошибка распознавания изображения."
