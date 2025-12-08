@@ -6,19 +6,16 @@ from dotenv import load_dotenv
 from telethon import TelegramClient
 from telethon.errors.rpcerrorlist import UnauthorizedError
 
-from src.handlers.handlers import (
-    universal_handler,
-    search_handler,
-    clear_handler,
-)
-
+from src.handlers.handlers import universal_handler
 from src.utils import create_initial_folders
+
 
 # ======================
 # SETTINGS
 # ======================
 
 SESSION_FILE = "bot_session"
+
 
 # ======================
 # ENV LOADING
@@ -46,7 +43,6 @@ async def bot() -> None:
     Main telegram bot loop with safe reconnect
     """
 
-    # создаём папки и хранилища
     create_initial_folders()
 
     while True:
@@ -63,15 +59,9 @@ async def bot() -> None:
 
             logging.info("🐾 Ассистент сети «Четыре Лапы — и не только» запущен!")
 
-            # ===============
-            # Handlers
-            # ===============
-
+            # ✅ Единственный обработчик
             client.add_event_handler(universal_handler)
-            client.add_event_handler(search_handler)
-            client.add_event_handler(clear_handler)
 
-            # run until disconnect
             await client.run_until_disconnected()
 
         except UnauthorizedError:
