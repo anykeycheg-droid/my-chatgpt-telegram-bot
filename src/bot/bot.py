@@ -7,7 +7,7 @@ from telethon import TelegramClient
 from telethon.errors.rpcerrorlist import UnauthorizedError
 
 from src.handlers.handlers import universal_handler
-from src.utils import create_initial_folders
+from src.utils.utils import create_initial_folders   # ✅ ПРАВИЛЬНЫЙ ИМПОРТ
 
 
 # ======================
@@ -43,6 +43,7 @@ async def bot() -> None:
     Main telegram bot loop with safe reconnect
     """
 
+    # ✅ создаём папки логов и истории диалогов
     create_initial_folders()
 
     while True:
@@ -62,6 +63,7 @@ async def bot() -> None:
             # ✅ Единственный обработчик
             client.add_event_handler(universal_handler)
 
+            # ✅ блокировка до отключения
             await client.run_until_disconnected()
 
         except UnauthorizedError:
