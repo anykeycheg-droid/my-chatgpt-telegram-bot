@@ -29,7 +29,7 @@ async def bash(command: str) -> str:
 
 
 # =====================================================
-# ✅ REAL INTERNET SEARCH (LIVE)
+# ✅ REAL INTERNET SEARCH
 # =====================================================
 
 async def search(query: str) -> str:
@@ -46,18 +46,19 @@ async def search(query: str) -> str:
         )
 
         text = response.output_text.strip()
+
         if not text:
-            return "🔎 Результаты не найдены."
+            return "🔎 Ничего не найдено."
 
         return text
 
     except Exception as e:
         logging.error(f"Web search error: {e}")
-        return "❌ Ошибка поиска. Попробуйте позже."
+        return "❌ Ошибка поиска. Попробуй позже."
 
 
 # =====================================================
-# IMAGE GENERATION
+# Image generation
 # =====================================================
 
 async def generate_image(prompt: str) -> str:
@@ -79,10 +80,13 @@ async def generate_image(prompt: str) -> str:
 
 
 # =====================================================
-# IMAGE ANALYSIS (VISION)
+# Vision
 # =====================================================
 
-async def analyze_image_with_gpt(image_bytes: bytes, user_prompt: str | None = None) -> str:
+async def analyze_image_with_gpt(
+    image_bytes: bytes,
+    user_prompt: str | None = None
+) -> str:
     try:
         prompt = user_prompt or "Опиши, что изображено на изображении."
 
@@ -98,7 +102,9 @@ async def analyze_image_with_gpt(image_bytes: bytes, user_prompt: str | None = N
                         {"type": "text", "text": prompt},
                         {
                             "type": "image_url",
-                            "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"},
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{image_b64}"
+                            },
                         },
                     ],
                 },

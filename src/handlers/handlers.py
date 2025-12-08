@@ -20,6 +20,7 @@ from src.functions.chat_func import (
 
 from src.utils import get_date_time
 
+
 TRIGGERS = [
     "душнилла",
     "бот",
@@ -35,7 +36,11 @@ TRIGGERS = [
     "dushnilla",
 ]
 
-SEARCH_TRIGGERS = ["найди в интернете", "найди", "поиск"]
+SEARCH_TRIGGERS = [
+    "найди в интернете",
+    "найди",
+    "поиск",
+]
 
 
 HELP_TEXT = """
@@ -50,92 +55,126 @@ HELP_TEXT = """
 /bash <cmd> — shell-команда
 /help — справка
 
-Пиши:
-«найди в интернете …»
-или
-«поиск …»
+В группах можно писать:
+«найди в интернете ...» или «поиск ...»
 
 👨‍💼 Вопросы:
 Дмитрий Лесных — @anykeycheg
 """
 
+
 def help_keyboard():
-    return [[Button.inline("ℹ Помощь", b"HELP")]]
+    return [[Button.inline("ℹ️ Помощь", b"HELP")]]
 
 
 @events.register(events.CallbackQuery(data=b"HELP"))
-async def help_cb(event):
-    await event.respond(HELP_TEXT, buttons=help_keyboard(), link_preview=False)
+async def help_callback(event):
+    await event.respond(
+        HELP_TEXT,
+        buttons=help_keyboard(),
+        link_preview=False,
+    )
 
 
 @events.register(events.NewMessage(pattern=r"/start"))
 @events.register(events.NewMessage(pattern=r"/help"))
-async def help_cmd(event):
-    await event.reply(HELP_TEXT, buttons=help_keyboard(), link_preview=False)
+async def help_handler(event):
+    await event.reply(
+        HELP_TEXT,
+        buttons=help_keyboard(),
+        link_preview=False,
+    )
     raise events.StopPropagation
 
 
 @events.register(events.NewMessage(pattern=r"/search"))
 @events.register(events.NewMessage(pattern=r"/поиск"))
-async def search_cmd(event):
-    q = re.sub(r"/(search|поиск)", "", event.raw_text, flags=re.IGNORECASE).strip()
-    await event.reply(await search(q))
+async def search_handler(event):
+    query = re.sub(r"/(search|поиск)", "", event.raw_text, flags=re.IGNORECASE).strip()
+    await event.reply(await search(query))
     raise events.StopPropagation
 
 
 @events.register(events.NewMessage(pattern=r"/bash"))
-async def bash_cmd(event):
+async def bash_handler(event):
     await event.reply(await bash(event.raw_text.replace("/bash", "").strip()))
     raise events.StopPropagation
 
 
 @events.register(events.NewMessage(pattern=r"/clear"))
-async def clear_cmd(event):
+async def clear_handler(event):
     await start_and_check(event, "Очистка истории", event.chat_id)
-    await event.reply("🗑 История диалога очищена")
+    await event.reply("🗑 История диалога очищена!")
     raise events.StopPropagation
 
 
 @events.register(events.NewMessage(pattern=r"/img"))
-async def img_cmd(event):
+async def img_handler(event):
     await event.reply(await generate_image(event.raw_text.replace("/img", "").strip()))
     raise events.StopPropagation
 
 
 @events.register(events.NewMessage(pattern=r"/today"))
-async def today_cmd(event):
+async def today_handler(event):
     await event.reply(f"📅 Сегодня: {get_date_time()}")
     raise events.StopPropagation
 
 
+# =====================================================
+# ✅ MAIN HANDLER — имя совпадает с bot.py
+# =====================================================
+
 @events.register(events.NewMessage)
-async def universal(event):
+async def universal_handler(event):
 
     try:
+
         if event.message.media:
-            b = await event.client.download_media(event.message, file=bytes)
-            a = await analyze_image_with_gpt(b, (event.message.text or "").strip())
-            await event.reply(a)
+            media_bytes = await event.client.download_media(
+                event.message,
+                file=bytes,
+            )
+
+            answer = await analyze_image_with_gpt(
+                media_bytes,
+                (event.message.text or "").strip()
+            )
+
+            await event.reply(answer)
             raise events.StopPropagation
 
         text = (event.raw_text or "").strip()
-        tl = text.lower()
-
-        for p in SEARCH_TRIGGERS:
-            if p in tl:
-                q = tl.replace(p, "").strip()
-                await event.reply(await search(q))
-                raise events.StopPropagation
-
-        if not event.is_private and not any(t in tl for t in TRIGGERS):
+        if not text:
             return
 
-        await event.client(SetTypingRequest(peer=event.chat_id, action=SendMessageTypingAction()))
+        text_lower = text.lower()
 
-        fn, hist = await start_and_check(event, text, event.chat_id)
-        a = await get_openai_response(hist, fn)
+        # -------- search by phrase ----------
+        for phrase in SEARCH_TRIGGERS:
+            if phrase in text_lower:
+                query = text_lower.replace(phrase, "").strip()
+                await event.reply(await search(query))
+                raise events.StopPropagation
 
-        await process_and_send_mess(event, a)
+        # -------- trigger logic ----------
+        if not event.is_private and not any(t in text_lower for t in TRIGGERS):
+            return
+
+        await event.client(
+            SetTypingRequest(
+                peer=event.chat_id,
+                action=SendMessageTypingAction(),
+            )
+        )
+
+        filename, history = await start_and_check(
+            event,
+            text,
+            event.chat_id,
+        )
+
+        answer = await get_openai_response(history, filename)
+        await process_and_send_mess(event, answer)
 
         raise events.StopPropagation
 
@@ -143,5 +182,6 @@ async def universal(event):
         return
 
     except Exception:
-        logging.exception("GLOBAL ERROR")
-        await event.reply("⚠ Ошибка обработки сообщения")
+        logging.exception("GLOBAL HANDLER ERROR")
+        await event.reply("⚠️ Ошибка обработки сообщения")
+        return
