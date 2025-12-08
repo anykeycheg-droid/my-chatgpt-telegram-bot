@@ -7,3 +7,12 @@ openai>=1.6.1
 tiktoken==0.7.0
 pytz==2024.2
 python-dotenv==1.0.1
+
+sentence-transformers
+faiss-cpu
+pymupdf
+python-docx
+python-pptx
+openpyxl
+tqdm
+
