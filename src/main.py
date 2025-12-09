@@ -1,95 +1,15 @@
-import sys
-import os
 import asyncio
 import logging
-from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
-
-# ===============================================================
-# FIX: add project root to PYTHONPATH
-# ===============================================================
-
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(PROJECT_ROOT)
-
-# ===============================================================
-# VERSION
-# ===============================================================
-
-try:
-    from __version__ import __version__
-    BOT_VERSION = __version__
-except Exception:
-    BOT_VERSION = "1.0.0"
-
-# ===============================================================
-# BOT IMPORT
-# ===============================================================
-
-from src.bot import bot
-
-# ===============================================================
-# CONFIG
-# ===============================================================
-
-BOT_NAME = "Dushnilla — ассистент сети «Четыре Лапы»"
+from src.bot.bot import bot
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    format="%(asctime)s | %(levelname)s | %(message)s"
 )
 
-logger = logging.getLogger("main")
-
-# ===============================================================
-# APP LIFECYCLE
-# ===============================================================
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    task = None
-
-    try:
-        loop = asyncio.get_event_loop()
-        task = loop.create_task(bot())
-        logger.info("✅ Bot background task started")
-    except Exception:
-        logger.exception("❌ Fatal error while starting bot")
-        raise
-
-    yield
-
-    if task:
-        task.cancel()
-        logger.info("🛑 Bot task cancelled")
-
-    logger.info("🧹 Application shutdown completed")
-
-# ===============================================================
-# FASTAPI
-# ===============================================================
-
-app = FastAPI(
-    title=BOT_NAME,
-    version=BOT_VERSION,
-    lifespan=lifespan,
-)
-
-# ===============================================================
-# ROUTES
-# ===============================================================
-
-@app.get("/", response_class=JSONResponse)
-async def root():
-    return {
-        "service": BOT_NAME,
-        "version": BOT_VERSION,
-        "status": "running",
-    }
+logging.info("🐾 Старт Telegram-ассистента «Четыре Лапы»")
 
 
-@app.get("/health", response_class=JSONResponse)
-async def health():
-    return {"status": "ok"}
+if __name__ == "__main__":
+    asyncio.run(bot())
