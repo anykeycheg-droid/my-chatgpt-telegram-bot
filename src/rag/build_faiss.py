@@ -3,7 +3,8 @@ import faiss
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 
-DOCS_FILE = "src/rag/docs.json"
+RAW_FILE = "src/rag/raw_docs.json"
+CHUNKS_FILE = "src/rag/docs.json"
 INDEX_FILE = "src/rag/faiss.index"
 
 CHUNK_SIZE = 900
@@ -17,20 +18,20 @@ def chunk_text(text):
 
 def main():
 
-    print("📥 Load documents...")
-    with open(DOCS_FILE, encoding="utf8") as f:
+    print("📥 Load RAW documents...")
+    with open(RAW_FILE, encoding="utf8") as f:
         docs = json.load(f)
 
     print(f"📄 Documents: {len(docs)}")
 
-    print("🔪 Chunking texts...")
     chunks = []
 
-    for d in docs:
+    print("🔪 Chunking texts...")
+    for d in tqdm(docs):
         for c in chunk_text(d["text"]):
             chunks.append({
                 "source": d["source"],
-                "text": c
+                "text": c,
             })
 
     print(f"✂ Total chunks: {len(chunks)}")
@@ -44,18 +45,17 @@ def main():
     vectors = model.encode(
         texts,
         batch_size=32,
-        show_progress_bar=True
+        show_progress_bar=True,
     )
 
     print("📦 Building FAISS index...")
     dim = vectors.shape[1]
-
     index = faiss.IndexFlatL2(dim)
     index.add(vectors)
 
     faiss.write_index(index, INDEX_FILE)
 
-    with open(DOCS_FILE, "w", encoding="utf8") as f:
+    with open(CHUNKS_FILE, "w", encoding="utf8") as f:
         json.dump(chunks, f, ensure_ascii=False, indent=2)
 
     print("\n✅ FAISS READY")

@@ -1,3 +1,4 @@
+import os
 import json
 import faiss
 from sentence_transformers import SentenceTransformer
@@ -7,19 +8,48 @@ DOCS_FILE = "src/rag/docs.json"
 
 MODEL = SentenceTransformer("all-MiniLM-L6-v2")
 
-INDEX = faiss.read_index(INDEX_FILE)
 
-with open(DOCS_FILE, encoding="utf8") as f:
-    CHUNKS = json.load(f)
+def load_index():
+    if not os.path.exists(INDEX_FILE):
+        raise FileNotFoundError("❌ FAISS index not found")
+
+    return faiss.read_index(INDEX_FILE)
 
 
-def search(query, top_k=5):
-    v = MODEL.encode([query])
-    d, i = INDEX.search(v, top_k)
+def load_chunks():
+    if not os.path.exists(DOCS_FILE):
+        raise FileNotFoundError("❌ CHUNKS docs file not found")
+
+    with open(DOCS_FILE, encoding="utf8") as f:
+        return json.load(f)
+
+
+INDEX = load_index()
+CHUNKS = load_chunks()
+
+
+def search(query: str, top_k: int = 5):
+
+    vector = MODEL.encode([query])
+
+    distances, indices = INDEX.search(vector, top_k)
 
     results = []
 
-    for ix in i[0]:
-        results.append(CHUNKS[ix])
+    for i in indices[0]:
+        if i < 0 or i >= len(CHUNKS):
+            continue
+        results.append(CHUNKS[i])
 
-    return results
+    if not results:
+        return "Ничего релевантного в базе не найдено."
+
+    output = "🔎 Найдено по базе знаний:\n\n"
+
+    for i, r in enumerate(results, 1):
+        snippet = r["text"][:600].rstrip() + "..."
+        source = r["source"].split("/")[-1]
+
+        output += f"{i}. 📄 {source}\n{snippet}\n\n"
+
+    return output.strip()
