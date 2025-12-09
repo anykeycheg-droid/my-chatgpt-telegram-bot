@@ -4,7 +4,7 @@ import os
 
 from dotenv import load_dotenv
 from telethon import TelegramClient
-from telethon.errors.rpcerrorlist import UnauthorizedError
+from telethon.errors import UnauthorizedError
 
 from src.handlers.handlers import (
     universal_handler,
@@ -32,14 +32,17 @@ SESSION_FILE = "bot_session"
 def load_keys():
     load_dotenv()
 
-    api_id = int(os.getenv("API_ID"))
+    api_id = os.getenv("API_ID")
     api_hash = os.getenv("API_HASH")
-    bot_token = os.getenv("BOTTOKEN")
+    bot_token = os.getenv("BOT_TOKEN")
 
-    if not all([api_id, api_hash, bot_token]):
-        raise RuntimeError("❌ Не заданы переменные окружения Telegram API")
+    if not api_id or not api_hash or not bot_token:
+        raise RuntimeError(
+            "❌ Не заданы переменные окружения: "
+            "API_ID / API_HASH / BOT_TOKEN"
+        )
 
-    return api_id, api_hash, bot_token
+    return int(api_id), api_hash, bot_token
 
 
 # ======================
@@ -48,46 +51,44 @@ def load_keys():
 
 async def bot() -> None:
     """
-    Main telegram bot loop with safe reconnect
+    Safe main bot loop with reconnect logic
     """
 
     create_initial_folders()
 
     while True:
+        client = None
+
         try:
             api_id, api_hash, bot_token = load_keys()
 
-            client = TelegramClient(
-                SESSION_FILE,
-                api_id,
-                api_hash,
-            )
+            client = TelegramClient(SESSION_FILE, api_id, api_hash)
 
             await client.start(bot_token=bot_token)
 
-            logging.info("🐾 Ассистент сети «Четыре Лапы — и не только» запущен!")
+            logging.info("🐾 Ассистент сети «Четыре Лапы» успешно запущен")
 
-            # ✅ Регистрируем ВСЕ обработчики один раз
-
+            # регистрируем handlers один раз
             client.add_event_handler(help_handler)
             client.add_event_handler(search_handler)
             client.add_event_handler(img_handler)
             client.add_event_handler(today_handler)
             client.add_event_handler(clear_handler)
-
             client.add_event_handler(universal_handler)
 
             await client.run_until_disconnected()
 
         except UnauthorizedError:
             logging.critical(
-                "❌ Telegram отказал в доступе. "
-                "Проверь BOTTOKEN / API_ID / API_HASH"
+                "❌ Telegram Unauthorized — проверь BOT_TOKEN / API_ID / API_HASH"
             )
             break
 
-        except Exception as e:
-            logging.exception(
-                f"⚠ Критическая ошибка bot loop: {e}"
-            )
+        except Exception:
+            logging.exception("⚠ Критическая ошибка в цикле бота")
             await asyncio.sleep(10)
+
+        finally:
+            if client:
+                await client.disconnect()
+                logging.info("🔌 Telegram client disconnected — reconnect")
