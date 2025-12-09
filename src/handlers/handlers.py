@@ -32,7 +32,6 @@ TRIGGERS = [
     "душик",
     "душнила",
     "душечка",
-    "du sh",
     "dush",
     "dushik",
     "dushnila",
@@ -142,9 +141,10 @@ async def img_handler(event):
 
         image_bytes = await generate_image(prompt)
 
+        # ✅ ГЛАВНЫЙ ФИКС — имя файла с расширением
         await event.respond(
             message=f"🖼 Генерация по запросу:\n{prompt}",
-            file=image_bytes,
+            file=("image.png", image_bytes),
         )
 
     except Exception:
