@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from src.bot.bot import bot
+from bot.bot import bot
 
 logging.basicConfig(
     level=logging.INFO,
@@ -9,7 +9,6 @@ logging.basicConfig(
 )
 
 logging.info("🐾 Старт Telegram-ассистента «Четыре Лапы»")
-
 
 if __name__ == "__main__":
     asyncio.run(bot())
