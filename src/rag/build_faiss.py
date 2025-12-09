@@ -1,37 +1,66 @@
-import os
-from sentence_transformers import SentenceTransformer
+import json
 import faiss
-import pickle
+from sentence_transformers import SentenceTransformer
+from tqdm import tqdm
 
-TEXT_FILE = "/data/all_docs.txt"
-INDEX_OUT = "/data/faiss.index"
+DOCS_FILE = "src/rag/docs.json"
+INDEX_FILE = "src/rag/faiss.index"
+
+CHUNK_SIZE = 900
 
 
-def chunk_text(txt, size=900):
-    words = txt.split()
-    for i in range(0, len(words), size):
-        yield " ".join(words[i:i+size])
+def chunk_text(text):
+    words = text.split()
+    for i in range(0, len(words), CHUNK_SIZE):
+        yield " ".join(words[i:i + CHUNK_SIZE])
 
 
 def main():
-    with open(TEXT_FILE, encoding="utf8") as f:
-        raw = f.read()
 
-    chunks = list(chunk_text(raw))
+    print("📥 Load documents...")
+    with open(DOCS_FILE, encoding="utf8") as f:
+        docs = json.load(f)
+
+    print(f"📄 Documents: {len(docs)}")
+
+    print("🔪 Chunking texts...")
+    chunks = []
+
+    for d in docs:
+        for c in chunk_text(d["text"]):
+            chunks.append({
+                "source": d["source"],
+                "text": c
+            })
+
+    print(f"✂ Total chunks: {len(chunks)}")
 
     model = SentenceTransformer("all-MiniLM-L6-v2")
-    vectors = model.encode(chunks)
 
+    texts = [c["text"] for c in chunks]
+
+    print("🧠 Generating embeddings...")
+
+    vectors = model.encode(
+        texts,
+        batch_size=32,
+        show_progress_bar=True
+    )
+
+    print("📦 Building FAISS index...")
     dim = vectors.shape[1]
+
     index = faiss.IndexFlatL2(dim)
     index.add(vectors)
 
-    faiss.write_index(index, INDEX_OUT)
+    faiss.write_index(index, INDEX_FILE)
 
-    with open("/data/chunks.pkl","wb") as f:
-        pickle.dump(chunks, f)
+    with open(DOCS_FILE, "w", encoding="utf8") as f:
+        json.dump(chunks, f, ensure_ascii=False, indent=2)
 
-    print("✅ FAISS ready:", len(chunks))
+    print("\n✅ FAISS READY")
+    print(f"INDEX: {INDEX_FILE}")
+    print(f"CHUNKS: {len(chunks)}")
 
 
 if __name__ == "__main__":

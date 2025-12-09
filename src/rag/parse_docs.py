@@ -1,11 +1,12 @@
 import os
+import json
 import fitz
 from docx import Document
 from pptx import Presentation
 import openpyxl
 
-DOCS_SRC = "./knowledge/4lapy_docs"
-DOCS_DST = "/data/docs"
+SRC_DIR = "knowledge/4lapy_docs"
+OUT_FILE = "src/rag/docs.json"
 
 
 def extract_pdf(path):
@@ -18,7 +19,7 @@ def extract_pdf(path):
 
 def extract_docx(path):
     d = Document(path)
-    return "\n".join([p.text for p in d.paragraphs])
+    return "\n".join(p.text for p in d.paragraphs)
 
 
 def extract_pptx(path):
@@ -52,29 +53,39 @@ HANDLERS = {
 
 
 def main():
-    os.makedirs(DOCS_DST, exist_ok=True)
-    all_docs = []
 
-    for root, _, files in os.walk(DOCS_SRC):
+    docs = []
+
+    for root, _, files in os.walk(SRC_DIR):
         for f in files:
             ext = os.path.splitext(f)[1].lower()
             if ext not in HANDLERS:
                 continue
 
             path = os.path.join(root, f)
+
             try:
-                text = HANDLERS[ext](path)
+                text = HANDLERS[ext](path).strip()
 
-                if len(text.strip()) > 300:
-                    all_docs.append(f"\n### SOURCE: {path}\n{text}")
+                if len(text) < 300:
+                    continue
 
-                print("OK:", f)
+                docs.append({
+                    "source": path.replace("\\", "/"),
+                    "text": text
+                })
+
+                print(f"OK: {f}")
 
             except Exception as e:
-                print("SKIP:", f, " => ", e)
+                print(f"SKIP: {f} -> {e}")
 
-    with open("/data/all_docs.txt", "w", encoding="utf8") as f:
-        f.write("\n\n".join(all_docs))
+    os.makedirs(os.path.dirname(OUT_FILE), exist_ok=True)
+
+    with open(OUT_FILE, "w", encoding="utf8") as f:
+        json.dump(docs, f, ensure_ascii=False, indent=2)
+
+    print(f"\n✅ SAVED {len(docs)} documents into {OUT_FILE}")
 
 
 if __name__ == "__main__":
