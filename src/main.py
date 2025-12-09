@@ -1,3 +1,5 @@
+import sys
+import os
 import asyncio
 import logging
 from contextlib import asynccontextmanager
@@ -5,23 +7,34 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from __version__ import __version__
-from src.bot import bot
+# ===============================================================
+# FIX: add project root to PYTHONPATH
+# ===============================================================
 
-# ===================
-# Basic App Settings
-# ===================
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(PROJECT_ROOT)
 
-BOT_NAME = "Dushnilla — ассистент сети «Четыре Лапы»"
+# ===============================================================
+# VERSION
+# ===============================================================
 
 try:
+    from __version__ import __version__
     BOT_VERSION = __version__
 except Exception:
-    BOT_VERSION = "unknown"
+    BOT_VERSION = "1.0.0"
 
-# ===================
-# Logging
-# ===================
+# ===============================================================
+# BOT IMPORT
+# ===============================================================
+
+from src.bot import bot
+
+# ===============================================================
+# CONFIG
+# ===============================================================
+
+BOT_NAME = "Dushnilla — ассистент сети «Четыре Лапы»"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -30,9 +43,9 @@ logging.basicConfig(
 
 logger = logging.getLogger("main")
 
-# ===================
-# App lifecycle
-# ===================
+# ===============================================================
+# APP LIFECYCLE
+# ===============================================================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -42,9 +55,9 @@ async def lifespan(app: FastAPI):
         loop = asyncio.get_event_loop()
         task = loop.create_task(bot())
         logger.info("✅ Bot background task started")
-    except Exception as e:
+    except Exception:
         logger.exception("❌ Fatal error while starting bot")
-        raise e
+        raise
 
     yield
 
@@ -54,31 +67,29 @@ async def lifespan(app: FastAPI):
 
     logger.info("🧹 Application shutdown completed")
 
-# ===================
-# FastAPI app
-# ===================
+# ===============================================================
+# FASTAPI
+# ===============================================================
 
 app = FastAPI(
     title=BOT_NAME,
     version=BOT_VERSION,
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
-# ===================
-# Routes
-# ===================
+# ===============================================================
+# ROUTES
+# ===============================================================
 
 @app.get("/", response_class=JSONResponse)
 async def root():
     return {
         "service": BOT_NAME,
         "version": BOT_VERSION,
-        "status": "running"
+        "status": "running",
     }
 
 
 @app.get("/health", response_class=JSONResponse)
 async def health():
-    return {
-        "status": "ok"
-    }
+    return {"status": "ok"}
