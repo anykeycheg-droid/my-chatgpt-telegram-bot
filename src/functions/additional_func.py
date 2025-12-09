@@ -8,86 +8,57 @@ from src.utils.utils import model, sys_mess
 
 client = OpenAI()
 
-
 # ==============================
-# WEB SEARCH (реальный интернет-поиск)
+# WEB SEARCH
 # ==============================
 
 async def search(query: str) -> str:
-    """
-    Поиск информации для команд /search, /поиск и текстовых триггеров.
-
-    ✅ Использует реальный интернет-поиск через OpenAI Web Search.
-    ✅ Всегда отвечает по-русски.
-    ✅ Если web_search недоступен, делает аккуратный fallback на обычный ответ модели.
-    """
 
     query = (query or "").strip()
+
     if not query:
         return "❌ Пожалуйста, укажи запрос для поиска."
 
-    # Инструкции для ассистента под бренд
-    prompt = (
-        "Ты — внимательный ассистент сети зоомагазинов «Четыре Лапы — и не только».\n"
-        "Твоя задача — сначала найти актуальную информацию в интернете, а затем кратко и понятно "
-        "ответить по-русски.\n\n"
-        "Требования к ответу:\n"
-        "• Отвечай по-русски.\n"
-        "• Если вопрос связан с животными, товарами для животных, здоровьем питомцев — "
-        "делай акцент на экспертности сети зоомагазинов «Четыре Лапы».\n"
-        "• Если указываешь факты (цены, даты, составы, нормативы) — опирайся на найденные источники.\n"
-        "• Если данных недостаточно или они противоречат друг другу — честно скажи об этом.\n\n"
-        f"Запрос пользователя: {query}"
-    )
+    prompt = f"""
+{sys_mess}
+
+Сначала выполни интернет-поиск.
+Затем дай краткий и понятный ответ.
+
+Запрос пользователя: {query}
+"""
 
     try:
-        # Основной путь — через responses + web_search tool
         response = client.responses.create(
-            model=model,  # тот же модельный идентификатор, что и для чата
+            model=model,
             input=prompt,
             tools=[{"type": "web_search"}],
             max_output_tokens=800,
         )
 
-        # Структура ответа: response.output[0].content[0].text
-        try:
-            text = response.output[0].content[0].text
-        except Exception:
-            # На всякий случай более «широкий» разбор
-            parts = []
-            for item in getattr(response, "output", []):
-                for c in getattr(item, "content", []):
-                    if getattr(c, "type", None) == "output_text":
-                        parts.append(c.text)
-            text = "\n".join(parts).strip() if parts else ""
+        text_parts = []
 
-        if not text:
-            raise ValueError("Пустой ответ от web_search модели")
+        for item in getattr(response, "output", []):
+            for c in getattr(item, "content", []):
+                if getattr(c, "type", None) == "output_text":
+                    text_parts.append(c.text)
 
-        return text.strip()
+        result = "\n".join(text_parts).strip()
 
-    except Exception as e:
-        # Логируем, но не ломаем бота
-        logging.exception("SEARCH ERROR (web_search)")
+        if not result:
+            raise ValueError("Пустой результат web_search")
 
-        # Fallback: обычный ответ модели без web_search
+        return result
+
+    except Exception:
+        logging.exception("SEARCH ERROR")
+
         try:
             completion = client.chat.completions.create(
                 model=model,
                 messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "Ты — ассистент сети зоомагазинов «Четыре Лапы — и не только». "
-                            "Отвечай всегда по-русски. "
-                            "Скажи честно, что тебе не удалось выполнить интернет-поиск, "
-                            "и отвечай только из своих общих знаний."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": f"Ответь, насколько можешь, без интернета: {query}",
-                    },
+                    {"role": "system", "content": sys_mess},
+                    {"role": "user", "content": query}
                 ],
                 max_tokens=800,
                 temperature=0.4,
@@ -95,9 +66,9 @@ async def search(query: str) -> str:
 
             return completion.choices[0].message.content.strip()
 
-        except Exception as e2:
-            logging.exception("SEARCH ERROR (fallback)")
-            return f"❌ Ошибка поиска: {e2}"
+        except Exception as e:
+            logging.exception("SEARCH FALLBACK ERROR")
+            return f"❌ Ошибка поиска: {e}"
 
 
 # ==============================
@@ -105,28 +76,21 @@ async def search(query: str) -> str:
 # ==============================
 
 async def generate_image(prompt: str) -> bytes:
-    """Генерация изображения через OpenAI Images API.
-    Возвращает байты PNG.
-    """
 
     if not prompt:
-        prompt = (
-            "Милое домашнее животное в фирменном стиле сети зоомагазинов "
-            "«Четыре Лапы — и не только»"
-        )
+        prompt = "Домашнее животное в фирменном стиле «Четыре Лапы»"
 
     try:
         result = client.images.generate(
             model="gpt-image-1",
             prompt=prompt,
-            size="1024x1024"
-            # ⚠️ response_format УБРАН — это главный фикс
+            size="1024x1024",
         )
 
         image_b64 = result.data[0].b64_json
         return base64.b64decode(image_b64)
 
-    except Exception as e:
+    except Exception:
         logging.exception("IMAGE GENERATION ERROR")
         raise
 
@@ -135,16 +99,12 @@ async def generate_image(prompt: str) -> bytes:
 # IMAGE ANALYSIS (VISION)
 # ==============================
 
-async def analyze_image_with_gpt(
-    image_bytes: bytes,
-    user_prompt: str | None = None
-) -> str:
-    """Анализ изображений GPT Vision"""
+async def analyze_image_with_gpt(image_bytes: bytes, user_prompt: str | None = None) -> str:
 
     try:
-        prompt = user_prompt or "Опиши, что изображено на картинке."
-
         image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+
+        prompt = user_prompt or "Опиши, пожалуйста, это изображение."
 
         response = client.chat.completions.create(
             model=model,
@@ -166,7 +126,7 @@ async def analyze_image_with_gpt(
             max_tokens=500,
         )
 
-        return response.choices[0].message.content
+        return response.choices[0].message.content.strip()
 
     except Exception as e:
         logging.exception("VISION ERROR")

@@ -11,69 +11,12 @@ from src.utils.utils import (
     max_token,
     read_existing_conversation,
     num_tokens_from_messages,
+    sys_mess,
 )
 
 client = OpenAI()
 
 Prompt = List[dict]
-
-# ===============================================================
-# SYSTEM PROMPT – BRAND CORE
-# ===============================================================
-
-SYSTEM_PROMPT = """
-Ты — корпоративный ИИ-ассистент сети зоомагазинов «Четыре Лапы»,
-работающий исключительно для сотрудников компании.
-
-Твоя задача:
-Помогать, обучать и консультировать сотрудников по стандартам сервиса,
-продажам, ассортименту, бизнес-процессам и уходу за питомцами.
-
-В личных беседах ты можешь поддерживать разговоры на любые темы,
-не ограничиваясь только тематикой бренда.
-
-СТИЛЬ ОБЩЕНИЯ:
-Дружелюбный, живой, уверенный, уважительный.
-Допустим корректный умный юмор.
-Запрещены подхалимство, рабская манера речи, сарказм и давление.
-Ты — профессиональный партнёр в диалоге.
-
-ЦЕННОСТИ:
-• Приоритет жизни и здоровья питомцев
-• Благополучие их семей
-• Комфорт и безопасность
-• Персональный подход
-• Обучение и поддержка
-• Формирование доверия
-
-ЛОГИКА ДИАЛОГА:
-Вопрос → Уточнение → Информация → Выгода → Поддержка выбора
-
-НЕ ИСПОЛЬЗУЙ ФРАЗЫ:
-«Чем вам помочь»
-«Что вас интересует»
-«Советую»
-«Рекомендую»
-«Можно предложить»
-
-ТАБУ:
-• Запрещена любая критика брендов из ассортимента «Четыре Лапы»
-• Запрещено давление и запугивание
-• Запрещены грубость и осуждение
-
-МЕДИЦИНСКИЕ КОНСУЛЬТАЦИИ:
-Ты можешь предполагать возможные причины симптомов и обсуждать варианты
-профилактики и лечения.
-
-Ты НЕ можешь ставить диагнозы и официально назначать лечение.
-
-Во всех медицинских ответах ОБЯЗАТЕЛЬНО добавляй фразу:
-«Для точной диагностики и назначения лечения необходимо обратиться к ветеринарному врачу.»
-
-RAG:
-При наличии корпоративных данных используй их в приоритетном порядке.
-Если информации нет — честно сообщай об этом.
-""".strip()
 
 
 # ===============================================================
@@ -91,7 +34,7 @@ RESPONSE_MAX_TOKENS = 1500
 
 def trim_prompt_window(prompt: Prompt) -> Prompt:
     """
-    Сохраняет все SYSTEM-сообщения и последние WINDOW_SIZE сообщений диалога.
+    Сохраняет SYSTEM сообщения и последние WINDOW_SIZE сообщений диалога.
     """
 
     system_msgs = [m for m in prompt if m["role"] == "system"]
@@ -100,37 +43,20 @@ def trim_prompt_window(prompt: Prompt) -> Prompt:
     if len(dialog_msgs) <= WINDOW_SIZE:
         return system_msgs + dialog_msgs
 
-    dialog_msgs = dialog_msgs[-WINDOW_SIZE:]
-
-    return system_msgs + dialog_msgs
+    return system_msgs + dialog_msgs[-WINDOW_SIZE:]
 
 
 def should_keep_message(text: str) -> bool:
-    """
-    Фильтрация мусорных сообщений:
-    короткие и бессмысленные ответы не сохраняем.
-    """
-
     if not text:
         return False
 
     trash = {
-        "ок",
-        "ага",
-        "понял",
-        "поняла",
-        "спасибо",
-        "окей",
-        "хорошо",
-        "ясно",
+        "ок", "ага", "понял", "поняла",
+        "спасибо", "окей", "хорошо", "ясно",
     }
 
     t = text.lower().strip()
-
-    if t in trash:
-        return False
-
-    if len(t) < 3:
+    if t in trash or len(t) < 3:
         return False
 
     return True
@@ -148,12 +74,8 @@ async def start_and_check(
 
     session, filename, prompt = read_existing_conversation(str(chat_id))
 
-    # Если диалог новый — добавляем SYSTEM PROMPT
     if not any(m["role"] == "system" for m in prompt):
-        prompt.insert(0, {
-            "role": "system",
-            "content": SYSTEM_PROMPT
-        })
+        prompt.insert(0, {"role": "system", "content": sys_mess})
 
     if should_keep_message(message):
         prompt.append({"role": "user", "content": message})
@@ -162,34 +84,21 @@ async def start_and_check(
 
     tokens = num_tokens_from_messages(prompt)
 
-    # Если превышен лимит — делаем summary
     if tokens > max_token - 700:
         await create_summary_and_reset(prompt, filename)
         session, filename, prompt = read_existing_conversation(str(chat_id))
 
-        # Повторно добавляем бренд-system
-        prompt.insert(0, {
-            "role": "system",
-            "content": SYSTEM_PROMPT
-        })
-
+        prompt.insert(0, {"role": "system", "content": sys_mess})
         prompt.append({"role": "user", "content": message})
 
     return filename, prompt
 
 
 # ===============================================================
-# SUMMARY CREATION
+# SUMMARY
 # ===============================================================
 
-async def create_summary_and_reset(
-    prompt: Prompt,
-    filename: str,
-):
-    """
-    Создает краткое summary диалога,
-    при этом НЕ затрагивает SYSTEM_PROMPT.
-    """
+async def create_summary_and_reset(prompt: Prompt, filename: str):
 
     try:
         dialog_only = [m for m in prompt if m["role"] != "system"]
@@ -198,9 +107,9 @@ async def create_summary_and_reset(
             {
                 "role": "system",
                 "content":
-                "Ты сжимаешь диалоги. "
-                "Сформируй краткое резюме беседы в 3–5 предложениях "
-                "по-русски, без деталей, только ключевые факты."
+                    "Ты сжимаешь диалоги. "
+                    "Создай краткое резюме беседы в 3–5 предложениях "
+                    "по-русски, только по ключевым фактам."
             },
             {
                 "role": "user",
@@ -218,14 +127,8 @@ async def create_summary_and_reset(
         summary = completion.choices[0].message.content.strip()
 
         new_prompt = [
-            {
-                "role": "system",
-                "content": SYSTEM_PROMPT
-            },
-            {
-                "role": "system",
-                "content": f"Резюме предыдущего диалога: {summary}",
-            }
+            {"role": "system", "content": sys_mess},
+            {"role": "system", "content": f"Резюме прошлого диалога: {summary}"},
         ]
 
         with open(filename, "w", encoding="utf-8") as f:
@@ -262,7 +165,7 @@ async def get_openai_response(prompt: Prompt, filename: str) -> str:
             if should_keep_message(message.content):
                 prompt.append({
                     "role": message.role,
-                    "content": message.content
+                    "content": message.content,
                 })
 
             with open(filename, "w", encoding="utf-8") as f:
@@ -286,10 +189,8 @@ async def get_openai_response(prompt: Prompt, filename: str) -> str:
 # TELEGRAM OUTPUT
 # ===============================================================
 
-async def process_and_send_mess(
-    event,
-    answer: str,
-):
+async def process_and_send_mess(event, answer: str):
+
     max_length = 4000
 
     for i in range(0, len(answer), max_length):
