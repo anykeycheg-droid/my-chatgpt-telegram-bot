@@ -2,13 +2,11 @@ import re
 import logging
 import os
 import uuid
-import base64
 
 from telethon import events, Button
 from telethon.tl.functions.messages import SetTypingRequest
 from telethon.tl.types import SendMessageTypingAction
 from telethon.errors import FloodWaitError
-
 
 # ✅ УБРАН `src.`
 from functions.additional_func import (
@@ -141,14 +139,11 @@ async def img_handler(event):
             await event.respond("Укажите описание изображения после команды /img")
             return
 
-        # ===== Получаем base64 от OpenAI
-        image_base64 = await generate_image(prompt)
+        # ===== Получаем БАЙТЫ PNG от OpenAI
+        image_bytes = await generate_image(prompt)
 
-        if not image_base64:
-            raise ValueError("Empty image result")
-
-        # ===== Декодируем в bytes
-        image_bytes = base64.b64decode(image_base64)
+        if not image_bytes or len(image_bytes) < 1000:
+            raise ValueError("Invalid image bytes result")
 
         # ===== Сохраняем во временный файл
         filename = f"/tmp/{uuid.uuid4().hex}.png"
@@ -192,18 +187,29 @@ async def today_handler(event):
 # =====================================================
 
 async def should_process_image(event, text_lower: str) -> bool:
+    """
+    Логика обработки изображений:
+    — Личка -> ВСЕГДА
+    — Группы:
+        • если ответ на бота
+        • если упоминание бота
+        • если триггер в тексте
+    """
+
     if event.is_private:
         return True
 
+    # Проверка ответа боту
     if event.is_reply:
         reply_msg = await event.get_reply_message()
-        me = await event.client.get_me()
-        if reply_msg and reply_msg.sender_id == me.id:
+        if reply_msg and reply_msg.sender_id == (await event.client.get_me()).id:
             return True
 
+    # Упоминание бота
     if "@dushnillabot" in text_lower:
         return True
 
+    # Триггеры
     if any(t in text_lower for t in TRIGGERS):
         return True
 
