@@ -6,7 +6,8 @@ from dotenv import load_dotenv
 from telethon import TelegramClient
 from telethon.errors import UnauthorizedError
 
-from src.handlers.handlers import (
+# ✅ ИМПОРТЫ БЕЗ `src.`
+from handlers.handlers import (
     universal_handler,
     help_handler,
     search_handler,
@@ -15,7 +16,7 @@ from src.handlers.handlers import (
     clear_handler,
 )
 
-from src.utils.utils import create_initial_folders
+from utils.utils import create_initial_folders
 
 
 # ======================
@@ -34,7 +35,9 @@ def load_keys():
 
     api_id = os.getenv("API_ID")
     api_hash = os.getenv("API_HASH")
-    bot_token = os.getenv("BOT_TOKEN")
+
+    # Унификация имени токена
+    bot_token = os.getenv("BOT_TOKEN") or os.getenv("BOTTOKEN")
 
     if not api_id or not api_hash or not bot_token:
         raise RuntimeError(
@@ -63,12 +66,11 @@ async def bot() -> None:
             api_id, api_hash, bot_token = load_keys()
 
             client = TelegramClient(SESSION_FILE, api_id, api_hash)
-
             await client.start(bot_token=bot_token)
 
             logging.info("🐾 Ассистент сети «Четыре Лапы» успешно запущен")
 
-            # регистрируем handlers один раз
+            # регистрируем handlers
             client.add_event_handler(help_handler)
             client.add_event_handler(search_handler)
             client.add_event_handler(img_handler)
