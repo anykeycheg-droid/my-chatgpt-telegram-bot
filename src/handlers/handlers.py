@@ -8,7 +8,6 @@ from telethon.tl.functions.messages import SetTypingRequest
 from telethon.tl.types import SendMessageTypingAction
 from telethon.errors import FloodWaitError
 
-# ✅ УБРАН `src.`
 from functions.additional_func import (
     search,
     generate_image,
@@ -48,20 +47,24 @@ SEARCH_TRIGGERS = [
     "поиск",
 ]
 
+IMAGE_QUESTION_PHRASES = [
+    "что на фото",
+    "что на картинке",
+    "что здесь изображено",
+    "что тут изображено",
+    "что изображено",
+    "что на изображении",
+]
+
 HELP_TEXT = """
 🤖 Ассистент сети зоомагазинов «Четыре Лапы» и не только! 🐾
 
 Команды:
-/search <запрос> — поиск в интернете
-/img <описание> — генерация изображения
-/today — текущая дата
-/clear — очистка истории
-/help — справка
-
-Триггеры в группах:
-«найди в интернете …»
-или
-«поиск …»
+ /search <запрос> — поиск в интернете
+ /img <описание> — генерация изображения
+ /today — текущая дата
+ /clear — очистка истории
+ /help — справка
 
 ℹ️ Напишите «помощь» — покажу возможности бота.
 """
@@ -109,10 +112,7 @@ async def search_handler(event):
         flags=re.IGNORECASE,
     ).strip()
 
-    await process_and_send_mess(
-        event,
-        await search(query)
-    )
+    await process_and_send_mess(event, await search(query))
     raise events.StopPropagation
 
 
@@ -139,26 +139,22 @@ async def img_handler(event):
             await event.respond("Укажите описание изображения после команды /img")
             return
 
-        # ===== Получаем БАЙТЫ PNG от OpenAI
         image_bytes = await generate_image(prompt)
 
         if not image_bytes or len(image_bytes) < 1000:
             raise ValueError("Invalid image bytes result")
 
-        # ===== Сохраняем во временный файл
         filename = f"/tmp/{uuid.uuid4().hex}.png"
 
         with open(filename, "wb") as f:
             f.write(image_bytes)
 
-        # ===== Отправка гарантированным методом Telethon
         await event.client.send_file(
             event.chat_id,
             file=filename,
             caption=f"🖼 Генерация изображения:\n{prompt}",
         )
 
-        # ===== Чистим временный файл
         try:
             os.remove(filename)
         except Exception:
@@ -186,30 +182,29 @@ async def today_handler(event):
 # MEDIA FILTER
 # =====================================================
 
-async def should_process_image(event, text_lower: str) -> bool:
+async def should_process_image(event, text_lower: str, is_reply=False) -> bool:
     """
     Логика обработки изображений:
-    — Личка -> ВСЕГДА
+    — Личка -> всегда
     — Группы:
-        • если ответ на бота
-        • если упоминание бота
-        • если триггер в тексте
+        • явный вопрос что на фото
+        • упоминание бота
+        • триггеры
+        • reply-вопрос к фото
     """
 
     if event.is_private:
         return True
 
-    # Проверка ответа боту
-    if event.is_reply:
-        reply_msg = await event.get_reply_message()
-        if reply_msg and reply_msg.sender_id == (await event.client.get_me()).id:
-            return True
+    if is_reply and any(p in text_lower for p in IMAGE_QUESTION_PHRASES):
+        return True
 
-    # Упоминание бота
+    if any(p in text_lower for p in IMAGE_QUESTION_PHRASES):
+        return True
+
     if "@dushnillabot" in text_lower:
         return True
 
-    # Триггеры
     if any(t in text_lower for t in TRIGGERS):
         return True
 
@@ -235,46 +230,53 @@ async def universal_handler(event):
         if text.startswith("/"):
             return
 
-        # -------- help trigger ----------
         if text_lower.strip() == "помощь":
             await process_and_send_mess(event, HELP_TEXT)
             raise events.StopPropagation
 
-        # -------- search trigger ----------
         for phrase in SEARCH_TRIGGERS:
             if phrase in text_lower:
                 query = text_lower.replace(phrase, "").strip()
                 await process_and_send_mess(event, await search(query))
                 raise events.StopPropagation
 
-        # -------------------------------------------------
-        # MEDIA (VISION)
-        # -------------------------------------------------
+        # =====================================================
+        # 1. ПРЯМОЕ ФОТО
+        # =====================================================
         if event.message.media:
-            allowed = await should_process_image(event, text_lower)
-            if not allowed:
+            if not await should_process_image(event, text_lower):
                 return
 
-            media_bytes = await event.client.download_media(
-                event.message,
-                file=bytes,
-            )
+            media_bytes = await event.client.download_media(event.message, file=bytes)
 
-            answer = await analyze_image_with_gpt(
-                media_bytes,
-                text,
-            )
+            answer = await analyze_image_with_gpt(media_bytes, text)
 
             await process_and_send_mess(event, answer)
             raise events.StopPropagation
 
-        # -------------------------------------------------
+        # =====================================================
+        # 2. REPLY НА ФОТО
+        # =====================================================
+        if event.is_reply:
+            reply_msg = await event.get_reply_message()
+
+            if reply_msg and reply_msg.media:
+                if not await should_process_image(event, text_lower, is_reply=True):
+                    return
+
+                media_bytes = await event.client.download_media(reply_msg, file=bytes)
+
+                answer = await analyze_image_with_gpt(media_bytes, text)
+
+                await process_and_send_mess(event, answer)
+                raise events.StopPropagation
+
+        # =====================================================
         # GROUP FILTER
-        # -------------------------------------------------
+        # =====================================================
         if not event.is_private and not any(t in text_lower for t in TRIGGERS):
             return
 
-        # typing indicator
         try:
             await event.client(
                 SetTypingRequest(
@@ -287,9 +289,6 @@ async def universal_handler(event):
         except Exception:
             logging.debug("Typing indicator failed")
 
-        # -------------------------------------------------
-        # LLM PIPELINE
-        # -------------------------------------------------
         filename, history = await start_and_check(
             event,
             text,
