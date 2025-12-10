@@ -1,120 +1,197 @@
-import os
 import json
-import re
+import os
+from pathlib import Path
+from typing import List, Dict
 
-import pdfplumber
+import fitz  # PyMuPDF
 from docx import Document
 from pptx import Presentation
-import openpyxl
+from openpyxl import load_workbook
 
 
-SRC_DIR = "knowledge/4lapy_docs"
-OUT_FILE = "src/rag/raw_docs.json"
+# Корень репозитория: .../my-chatgpt-telegram-bot
+BASE_DIR = Path(__file__).resolve().parents[2]
+# Папка с оригинальными документами
+KNOWLEDGE_DIR = BASE_DIR / "knowledge" / "4lapy_docs"
+# Куда сохраняем подготовленные чанки
+OUTPUT_PATH = Path(__file__).resolve().parent / "docs.json"
 
 
-# =====================================
-# CLEANING
-# =====================================
-
-def clean_text(text: str) -> str:
-    text = re.sub(r"\s+", " ", text)
-    text = re.sub(r"[^\x20-\x7Eа-яА-ЯёЁ]", " ", text)
-    return text.strip()
-
-
-# =====================================
-# EXTRACTORS
-# =====================================
-
-def extract_pdf(path):
-    text = ""
-    with pdfplumber.open(path) as pdf:
-        for page in pdf.pages:
-            text += page.extract_text() or ""
-
-    return clean_text(text)
+def iter_files(root: Path) -> List[Path]:
+    """Собираем все поддерживаемые файлы из knowledge/4lapy_docs."""
+    exts = {".pdf", ".docx", ".pptx", ".xlsx"}
+    result: List[Path] = []
+    for dirpath, _, filenames in os.walk(root):
+        for name in filenames:
+            path = Path(dirpath) / name
+            if path.suffix.lower() in exts:
+                result.append(path)
+    return result
 
 
-def extract_docx(path):
+def chunk_text(text: str, max_chars: int = 800, overlap: int = 100) -> List[str]:
+    """Рубим длинный текст на куски для RAG."""
+    text = (text or "").strip()
+    if not text:
+        return []
+
+    if len(text) <= max_chars:
+        return [text]
+
+    chunks: List[str] = []
+    start = 0
+    length = len(text)
+
+    while start < length:
+        end = start + max_chars
+        chunk = text[start:end]
+        chunks.append(chunk.strip())
+        if end >= length:
+            break
+        start = end - overlap  # небольшое перекрытие
+
+    return chunks
+
+
+def extract_from_pdf(path: Path) -> List[Dict]:
+    rel = path.relative_to(BASE_DIR).as_posix()
+    out: List[Dict] = []
+
+    doc = fitz.open(path)
+    try:
+        for page_index in range(len(doc)):
+            page = doc.load_page(page_index)
+            text = page.get_text("text")
+            for chunk in chunk_text(text):
+                out.append(
+                    {
+                        "text": chunk,
+                        "source": rel,
+                        "source_file": path.name,
+                        "page": page_index + 1,
+                        "section": "",
+                    }
+                )
+    finally:
+        doc.close()
+
+    return out
+
+
+def extract_from_docx(path: Path) -> List[Dict]:
+    rel = path.relative_to(BASE_DIR).as_posix()
+    out: List[Dict] = []
+
     doc = Document(path)
-    return clean_text("\n".join(p.text for p in doc.paragraphs))
+    paragraphs = [p.text for p in doc.paragraphs if p.text and p.text.strip()]
+    text = "\n".join(paragraphs)
+
+    for chunk in chunk_text(text):
+        out.append(
+            {
+                "text": chunk,
+                "source": rel,
+                "source_file": path.name,
+                "page": None,
+                "section": "",
+            }
+        )
+    return out
 
 
-def extract_pptx(path):
+def extract_from_pptx(path: Path) -> List[Dict]:
+    rel = path.relative_to(BASE_DIR).as_posix()
+    out: List[Dict] = []
+
     prs = Presentation(path)
-    txt = ""
-    for slide in prs.slides:
+    for slide_index, slide in enumerate(prs.slides, start=1):
+        texts = []
         for shape in slide.shapes:
             if hasattr(shape, "text"):
-                txt += shape.text + "\n"
-    return clean_text(txt)
+                t = shape.text.strip()
+                if t:
+                    texts.append(t)
+        if not texts:
+            continue
+        text = "\n".join(texts)
+        for chunk in chunk_text(text):
+            out.append(
+                {
+                    "text": chunk,
+                    "source": rel,
+                    "source_file": path.name,
+                    "page": slide_index,
+                    "section": "",
+                }
+            )
+    return out
 
 
-def extract_xlsx(path):
-    wb = openpyxl.load_workbook(path)
-    txt = ""
+def extract_from_xlsx(path: Path) -> List[Dict]:
+    rel = path.relative_to(BASE_DIR).as_posix()
+    out: List[Dict] = []
 
-    for sheet in wb:
-        for row in sheet.iter_rows():
-            for cell in row:
-                if cell.value:
-                    txt += str(cell.value) + " "
-            txt += "\n"
+    wb = load_workbook(path, data_only=True)
+    try:
+        for sheet in wb.worksheets:
+            rows_text = []
+            for row in sheet.iter_rows():
+                values = [str(c.value).strip() for c in row if c.value not in (None, "")]
+                if values:
+                    rows_text.append(" | ".join(values))
+            if not rows_text:
+                continue
+            text = f"Лист: {sheet.title}\n" + "\n".join(rows_text)
+            for chunk in chunk_text(text):
+                out.append(
+                    {
+                        "text": chunk,
+                        "source": rel,
+                        "source_file": path.name,
+                        "page": None,
+                        "section": sheet.title,
+                    }
+                )
+    finally:
+        wb.close()
 
-    return clean_text(txt)
+    return out
 
-
-def extract_txt(path):
-    with open(path, encoding="utf8", errors="ignore") as f:
-        return clean_text(f.read())
-
-
-HANDLERS = {
-    ".pdf": extract_pdf,
-    ".docx": extract_docx,
-    ".pptx": extract_pptx,
-    ".xlsx": extract_xlsx,
-    ".txt": extract_txt,
-}
-
-# =====================================
-# MAIN PIPELINE
-# =====================================
 
 def main():
-    docs = []
+    all_chunks: List[Dict] = []
 
-    for root, _, files in os.walk(SRC_DIR):
-        for filename in files:
-            ext = os.path.splitext(filename)[1].lower()
+    if not KNOWLEDGE_DIR.exists():
+        raise SystemExit(f"Knowledge directory not found: {KNOWLEDGE_DIR}")
 
-            if ext not in HANDLERS:
-                continue
+    files = iter_files(KNOWLEDGE_DIR)
+    print(f"Found {len(files)} source files under {KNOWLEDGE_DIR}")
 
-            path = os.path.join(root, filename)
+    for path in files:
+        print(f"Processing {path}")
+        suffix = path.suffix.lower()
+        try:
+            if suffix == ".pdf":
+                chunks = extract_from_pdf(path)
+            elif suffix == ".docx":
+                chunks = extract_from_docx(path)
+            elif suffix == ".pptx":
+                chunks = extract_from_pptx(path)
+            elif suffix == ".xlsx":
+                chunks = extract_from_xlsx(path)
+            else:
+                chunks = []
+        except Exception as e:
+            print(f"Error while processing {path}: {e}")
+            continue
 
-            try:
-                text = HANDLERS[ext](path)
+        all_chunks.extend(chunks)
 
-                if len(text) < 300:
-                    continue
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
+        json.dump(all_chunks, f, ensure_ascii=False, indent=2)
 
-                docs.append({
-                    "source": path.replace("\\", "/"),
-                    "text": text
-                })
-
-                print("OK:", path)
-
-            except Exception as e:
-                print("SKIP:", path, "->", e)
-
-    os.makedirs(os.path.dirname(OUT_FILE), exist_ok=True)
-
-    with open(OUT_FILE, "w", encoding="utf8") as f:
-        json.dump(docs, f, ensure_ascii=False, indent=2)
-
-    print(f"\n✅ Saved RAW docs: {len(docs)} → {OUT_FILE}")
+    print(f"Saved {len(all_chunks)} chunks to {OUTPUT_PATH}")
 
 
 if __name__ == "__main__":

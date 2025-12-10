@@ -1,7 +1,8 @@
 import json
 import logging
 import time
-from typing import List, Tuple
+from pathlib import Path
+from typing import List, Tuple, Dict, Any, Optional
 
 from openai import OpenAI
 from telethon.events import NewMessage
@@ -14,12 +15,11 @@ from utils.utils import (
     sys_mess,
 )
 
-from functions.additional_func import search
+from functions.additional_func import search as web_search
+from rag.search import search as rag_search
 
 client = OpenAI()
-
 Prompt = List[dict]
-
 
 # ===============================================================
 # SETTINGS
@@ -33,6 +33,24 @@ WAIT_WEB_CONFIRM_STATE = "__WAIT_WEB_SEARCH_CONFIRM__"
 
 YES_WORDS = {"да", "давай", "ага", "ищи", "найди", "ок"}
 NO_WORDS = {"нет", "не надо", "не нужно"}
+
+FILE_REQUEST_WORDS = {
+    "скинь",
+    "пришли",
+    "перешли",
+    "дай файл",
+    "отправь файл",
+    "дай документ",
+    "пришли документ",
+    "перешли документ",
+    "скинь памятку",
+    "выдай документ",
+    "pdf",
+}
+
+
+BASE_PROJECT_DIR = Path(__file__).resolve().parents[2]
+
 
 # ===============================================================
 # HELPERS
@@ -54,14 +72,18 @@ def should_keep_message(text: str) -> bool:
         return False
 
     trash = {
-        "ок", "ага", "понял", "поняла", "спасибо", "окей", "хорошо", "ясно"
+        "ок",
+        "ага",
+        "понял",
+        "поняла",
+        "спасибо",
+        "окей",
+        "хорошо",
+        "ясно",
     }
 
     t = text.lower().strip()
-    if t in trash:
-        return False
-
-    return True
+    return t not in trash
 
 
 def is_affirmative(text: str) -> bool:
@@ -72,27 +94,104 @@ def is_negative(text: str) -> bool:
     return any(w in text.lower() for w in NO_WORDS)
 
 
+def request_documents(text: str) -> bool:
+    text = text.lower()
+    return any(patt in text for patt in FILE_REQUEST_WORDS)
+
+
 # ===============================================================
-# ALWAYS TRY RAG FIRST
+# RAG
 # ===============================================================
 
-def try_rag(query: str) -> str | None:
+def _format_rag_chunks(
+    chunks: List[Dict[str, Any]],
+    max_sources: int = 3,
+    max_chars: int = 2500,
+) -> Tuple[str, List[Dict[str, Any]]]:
+
+    if not chunks:
+        return "", []
+
+    lines: List[str] = []
+    sources: List[Dict[str, Any]] = []
+    used = set()
+    total_len = 0
+
+    for rank, ch in enumerate(chunks[:max_sources], start=1):
+        text = (ch.get("text") or "").strip()
+        if not text:
+            continue
+
+        source_file = ch.get("source_file") or ch.get("source")
+        page = ch.get("page")
+
+        snippet = text[:800]
+        header = f"[{rank}] Источник: {source_file}"
+        if page:
+            header += f", стр. {page}"
+
+        block = f"{header}\n{snippet}"
+
+        if total_len + len(block) > max_chars:
+            break
+
+        lines.append(block)
+        total_len += len(block)
+
+        key = (source_file, page)
+        if key not in used:
+            used.add(key)
+            sources.append(
+                {
+                    "source_file": source_file,
+                    "page": page,
+                }
+            )
+
+    return "\n\n---\n\n".join(lines), sources
+
+
+def _build_sources_hint(sources: List[Dict[str, Any]]) -> str:
+    if not sources:
+        return ""
+
+    lines = []
+    for s in sources:
+        name = s.get("source_file") or "внутренний документ"
+        page = s.get("page")
+        if page:
+            name += f", стр. {page}"
+        lines.append(f"- {name}")
+
+    return "\n".join(lines)
+
+
+def try_rag(query: str) -> Optional[Dict[str, Any]]:
     try:
-        return search(query)
+        chunks = rag_search(query)
+
+        if not chunks:
+            return None
+
+        formatted, sources = _format_rag_chunks(chunks)
+        if not formatted:
+            return None
+
+        return {
+            "formatted": formatted,
+            "sources": sources,
+        }
+
     except Exception:
         logging.exception("RAG SEARCH ERROR")
         return None
 
 
 # ===============================================================
-# CHAT FLOW
+# CHAT
 # ===============================================================
 
-async def start_and_check(
-    event: NewMessage,
-    message: str,
-    chat_id: int,
-) -> Tuple[str, Prompt]:
+async def start_and_check(event: NewMessage, message: str, chat_id: int):
 
     session, filename, prompt = read_existing_conversation(str(chat_id))
 
@@ -102,78 +201,97 @@ async def start_and_check(
     text = message.strip()
 
     # ===================================================
-    # CASE 1 — ожидаем подтверждение web search
+    # SEND DOCUMENT REQUEST
     # ===================================================
 
-    if session.get("state") == WAIT_WEB_CONFIRM_STATE:
+    if request_documents(text):
 
-        if is_affirmative(text):
-            session["state"] = None
+        sources = session.get("last_rag_sources", [])
 
-            web_result = await search(session.get("last_rag_query", text))
+        if not sources:
+            return filename, [
+                {
+                    "role": "assistant",
+                    "content": "У меня ещё нет контекста, из какого документа отправлять файл. Задайте вопрос сначала.",
+                }
+            ]
 
-            prompt.append({
-                "role": "assistant",
-                "content": f"🌐 Вот результаты поиска в интернете:\n\n{web_result}"
-            })
+        attachments = []
+        for s in sources:
+            rel_path = s.get("source_file")
+            if not rel_path:
+                continue
 
-            save_session(filename, session, prompt)
-            return filename, prompt
+            full_path = BASE_PROJECT_DIR / rel_path
+            if full_path.exists():
+                attachments.append(full_path)
 
-        elif is_negative(text):
-            session["state"] = None
+        if not attachments:
+            return filename, [
+                {
+                    "role": "assistant",
+                    "content": "Не удалось найти файлы документов на сервере.",
+                }
+            ]
 
-            prompt.append({
-                "role": "assistant",
-                "content": "Хорошо, интернет-поиск выполнять не буду."
-            })
+        # Отправляем файлы
+        for f in attachments:
+            await event.client.send_file(
+                chat_id,
+                file=f,
+                caption=f"Источник: {f.name}",
+            )
 
-            save_session(filename, session, prompt)
-            return filename, prompt
-
-        else:
-            prompt.append({
-                "role": "assistant",
-                "content": "Пожалуйста, ответьте: искать информацию в интернете — да или нет?"
-            })
-
-            save_session(filename, session, prompt)
-            return filename, prompt
+        return filename, []
 
 
     # ===================================================
-    # CASE 2 — NORMAL QUESTION → ALWAYS TRY RAG
+    # NORMAL QUESTION
     # ===================================================
 
-    rag_result = try_rag(text)
+    rag_payload = try_rag(text)
 
-    if rag_result:
-        prompt.insert(1, {
-            "role": "system",
-            "content":
-                "Ты корпоративный ассистент сети «Четыре Лапы».\n"
-                "Отвечай строго ТОЛЬКО используя информацию ниже. "
-                "Не придумывай.\n\n"
-                "=== ВНУТРЕННЯЯ БАЗА ===\n"
-                f"{rag_result}\n"
-                "=== КОНЕЦ ==="
-        })
+    if rag_payload:
 
+        rag_text = rag_payload["formatted"]
+        rag_sources = rag_payload["sources"]
+
+        session["state"] = None
+        session["last_rag_sources"] = rag_sources
+
+        sources_hint = _build_sources_hint(rag_sources)
+
+        system_content = (
+            "Ты корпоративный ассистент сети «Четыре Лапы».\n"
+            "Отвечай строго только на базе информации ниже.\n\n"
+            "=== ВНУТРЕННЯЯ БАЗА ===\n"
+            f"{rag_text}\n"
+            "=== КОНЕЦ ===\n\n"
+        )
+
+        if sources_hint:
+            system_content += (
+                "В конце ответа добавь:\n"
+                "📚 Источники:\n"
+                f"{sources_hint}"
+            )
+
+        prompt.insert(1, {"role": "system", "content": system_content})
         prompt.append({"role": "user", "content": text})
 
     else:
-        # RAG ничего не дал → спрашиваем пользоваться ли интернетом
         session["state"] = WAIT_WEB_CONFIRM_STATE
         session["last_rag_query"] = text
 
-        prompt.append({
-            "role": "assistant",
-            "content":
-                "Во внутренней базе знаний компании нет точной информации "
-                "по этому вопросу.\n\n"
-                "Я могу попробовать найти ответ в интернете.\n"
-                "Искать информацию?"
-        })
+        prompt.append(
+            {
+                "role": "assistant",
+                "content": (
+                    "Во внутренней базе знаний нет точной информации по этому вопросу.\n"
+                    "Искать ответ в интернете?"
+                ),
+            }
+        )
 
         save_session(filename, session, prompt)
         return filename, prompt
@@ -185,7 +303,10 @@ async def start_and_check(
     if tokens > max_token - 500:
         await create_summary_and_reset(prompt, filename)
         session, filename, prompt = read_existing_conversation(str(chat_id))
-        prompt.insert(0, {"role": "system", "content": sys_mess})
+
+        if not any(m["role"] == "system" for m in prompt):
+            prompt.insert(0, {"role": "system", "content": sys_mess})
+
         prompt.append({"role": "user", "content": text})
 
     return filename, prompt
@@ -196,22 +317,15 @@ async def start_and_check(
 # ===============================================================
 
 async def create_summary_and_reset(prompt: Prompt, filename: str):
-
     try:
         dialog_only = [m for m in prompt if m["role"] != "system"]
 
         summary_prompt = [
             {
                 "role": "system",
-                "content":
-                    "Ты сжимаешь диалоги. "
-                    "Создай краткое резюме беседы в 3–5 предложениях "
-                    "по-русски, только по ключевым фактам.",
+                "content": "Сожми диалог в краткое резюме из 3–5 предложений.",
             },
-            {
-                "role": "user",
-                "content": json.dumps(dialog_only, ensure_ascii=False),
-            }
+            {"role": "user", "content": json.dumps(dialog_only, ensure_ascii=False)},
         ]
 
         completion = client.chat.completions.create(
@@ -235,11 +349,10 @@ async def create_summary_and_reset(prompt: Prompt, filename: str):
 
 
 # ===============================================================
-# FILE SAVE
+# SAVE
 # ===============================================================
 
 def save_session(filename: str, session: dict, prompt: Prompt):
-
     try:
         with open(filename, "w", encoding="utf-8") as f:
             json.dump(
@@ -253,51 +366,3 @@ def save_session(filename: str, session: dict, prompt: Prompt):
             )
     except Exception as e:
         logging.error(f"SAVE SESSION ERROR: {e}")
-
-
-# ===============================================================
-# OPENAI RESPONSE
-# ===============================================================
-
-async def get_openai_response(prompt: Prompt, filename: str) -> str:
-
-    for attempt in range(5):
-        try:
-            prompt = trim_prompt_window(prompt)
-
-            completion = client.chat.completions.create(
-                model=model,
-                messages=prompt,
-                max_tokens=RESPONSE_MAX_TOKENS,
-                temperature=0.2,
-            )
-
-            message = completion.choices[0].message
-
-            if should_keep_message(message.content):
-                prompt.append({
-                    "role": message.role,
-                    "content": message.content,
-                })
-
-            save_session(filename, {}, prompt)
-
-            return message.content.strip()
-
-        except Exception as e:
-            logging.error(f"OpenAI error {attempt + 1}/5: {e}")
-            time.sleep(2)
-
-    return "⚠️ OpenAI временно недоступен. Попробуй позже."
-
-
-# ===============================================================
-# TELEGRAM OUTPUT
-# ===============================================================
-
-async def process_and_send_mess(event, answer: str):
-
-    max_length = 4000
-
-    for i in range(0, len(answer), max_length):
-        await event.reply(answer[i:i + max_length])

@@ -1,55 +1,74 @@
-import os
 import json
+from pathlib import Path
+from typing import List, Dict, Any
+
 import faiss
 from sentence_transformers import SentenceTransformer
 
-INDEX_FILE = "src/rag/faiss.index"
-DOCS_FILE = "src/rag/docs.json"
+BASE_DIR = Path(__file__).resolve().parent
+INDEX_FILE = BASE_DIR / "faiss.index"
+DOCS_FILE = BASE_DIR / "docs.json"
 
 MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+INDEX = faiss.read_index(str(INDEX_FILE))
+
+with open(DOCS_FILE, encoding="utf-8") as f:
+    CHUNKS: List[Dict[str, Any]] = json.load(f)
 
 
-def load_index():
-    if not os.path.exists(INDEX_FILE):
-        raise FileNotFoundError("❌ FAISS index not found")
+def search(query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+    """
+    FAISS-поиск по внутренней базе.
 
-    return faiss.read_index(INDEX_FILE)
+    Возвращает список словарей:
+    {
+        "rank": int,
+        "score": float,
+        "text": str,
+        "source": str,
+        "source_file": str,
+        "page": int | None,
+        "section": str | None,
+    }
+    """
+    if not query:
+        return []
 
+    v = MODEL.encode([query])
+    distances, indices = INDEX.search(v, top_k)
 
-def load_chunks():
-    if not os.path.exists(DOCS_FILE):
-        raise FileNotFoundError("❌ CHUNKS docs file not found")
-
-    with open(DOCS_FILE, encoding="utf8") as f:
-        return json.load(f)
-
-
-INDEX = load_index()
-CHUNKS = load_chunks()
-
-
-def search(query: str, top_k: int = 5):
-
-    vector = MODEL.encode([query])
-
-    distances, indices = INDEX.search(vector, top_k)
-
-    results = []
-
-    for i in indices[0]:
-        if i < 0 or i >= len(CHUNKS):
+    results: List[Dict[str, Any]] = []
+    for rank, (idx, dist) in enumerate(zip(indices[0], distances[0]), start=1):
+        if idx < 0:
             continue
-        results.append(CHUNKS[i])
+        if idx >= len(CHUNKS):
+            continue
 
-    if not results:
-        return "Ничего релевантного в базе не найдено."
+        chunk = CHUNKS[idx]
+        if isinstance(chunk, dict):
+            text = chunk.get("text")
+            source = chunk.get("source")
+            source_file = chunk.get("source_file")
+            page = chunk.get("page")
+            section = chunk.get("section")
+        else:
+            # на всякий случай, если старый формат docs.json
+            text = str(chunk)
+            source = None
+            source_file = None
+            page = None
+            section = None
 
-    output = "🔎 Найдено по базе знаний:\n\n"
+        results.append(
+            {
+                "rank": rank,
+                "score": float(dist),
+                "text": text,
+                "source": source,
+                "source_file": source_file,
+                "page": page,
+                "section": section,
+            }
+        )
 
-    for i, r in enumerate(results, 1):
-        snippet = r["text"][:600].rstrip() + "..."
-        source = r["source"].split("/")[-1]
-
-        output += f"{i}. 📄 {source}\n{snippet}\n\n"
-
-    return output.strip()
+    return results
