@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
+
 set -e
 
 echo "✅ Starting bot with prebuilt FAISS index"
 
-python -u src/main.py
+exec python -u src/main.py
