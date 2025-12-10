@@ -1,5 +1,8 @@
 import re
 import logging
+import os
+import uuid
+import base64
 
 from telethon import events, Button
 from telethon.tl.functions.messages import SetTypingRequest
@@ -122,6 +125,10 @@ async def clear_handler(event):
     raise events.StopPropagation
 
 
+# =====================================================
+# IMAGE GENERATION (/img)
+# =====================================================
+
 @events.register(events.NewMessage(pattern=r"/img"))
 async def img_handler(event):
     if event.out:
@@ -134,17 +141,42 @@ async def img_handler(event):
             await event.respond("Укажите описание изображения после команды /img")
             return
 
-        image_bytes = await generate_image(prompt)
+        # ===== Получаем base64 от OpenAI
+        image_base64 = await generate_image(prompt)
 
-        await event.respond(
-            message=f"🖼 Генерация изображения:\n{prompt}",
-            file=("image.png", image_bytes),
+        if not image_base64:
+            raise ValueError("Empty image result")
+
+        # ===== Декодируем в bytes
+        image_bytes = base64.b64decode(image_base64)
+
+        # ===== Сохраняем во временный файл
+        filename = f"/tmp/{uuid.uuid4().hex}.png"
+
+        with open(filename, "wb") as f:
+            f.write(image_bytes)
+
+        # ===== Отправка гарантированным методом Telethon
+        await event.client.send_file(
+            event.chat_id,
+            file=filename,
+            caption=f"🖼 Генерация изображения:\n{prompt}",
         )
+
+        # ===== Чистим временный файл
+        try:
+            os.remove(filename)
+        except Exception:
+            pass
 
     except Exception:
         logging.exception("IMG ERROR")
         await event.respond("❌ Ошибка генерации изображения")
 
+
+# =====================================================
+# TODAY
+# =====================================================
 
 @events.register(events.NewMessage(pattern=r"/today"))
 async def today_handler(event):
