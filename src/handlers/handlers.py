@@ -6,19 +6,21 @@ from telethon.tl.functions.messages import SetTypingRequest
 from telethon.tl.types import SendMessageTypingAction
 from telethon.errors import FloodWaitError
 
-from src.functions.additional_func import (
+
+# ✅ УБРАН `src.`
+from functions.additional_func import (
     search,
     generate_image,
     analyze_image_with_gpt,
 )
 
-from src.functions.chat_func import (
+from functions.chat_func import (
     process_and_send_mess,
     start_and_check,
     get_openai_response,
 )
 
-from src.utils.utils import get_date_time
+from utils.utils import get_date_time
 
 
 # =====================================================
@@ -74,13 +76,21 @@ def help_keyboard():
 
 @events.register(events.CallbackQuery(data=b"HELP"))
 async def help_callback(event):
-    await event.respond(HELP_TEXT, buttons=help_keyboard(), link_preview=False)
+    await event.respond(
+        HELP_TEXT,
+        buttons=help_keyboard(),
+        link_preview=False,
+    )
 
 
 @events.register(events.NewMessage(pattern=r"/start"))
 @events.register(events.NewMessage(pattern=r"/help"))
 async def help_handler(event):
-    await event.reply(HELP_TEXT, buttons=help_keyboard(), link_preview=False)
+    await event.reply(
+        HELP_TEXT,
+        buttons=help_keyboard(),
+        link_preview=False,
+    )
     raise events.StopPropagation
 
 
@@ -98,7 +108,10 @@ async def search_handler(event):
         flags=re.IGNORECASE,
     ).strip()
 
-    await process_and_send_mess(event, await search(query))
+    await process_and_send_mess(
+        event,
+        await search(query)
+    )
     raise events.StopPropagation
 
 
@@ -135,7 +148,10 @@ async def img_handler(event):
 
 @events.register(events.NewMessage(pattern=r"/today"))
 async def today_handler(event):
-    await process_and_send_mess(event, f"📅 Сегодня: {get_date_time()}")
+    await process_and_send_mess(
+        event,
+        f"📅 Сегодня: {get_date_time()}",
+    )
     raise events.StopPropagation
 
 
@@ -183,10 +199,7 @@ async def universal_handler(event):
 
         # -------- help trigger ----------
         if text_lower.strip() == "помощь":
-            await process_and_send_mess(
-                event,
-                HELP_TEXT
-            )
+            await process_and_send_mess(event, HELP_TEXT)
             raise events.StopPropagation
 
         # -------- search trigger ----------
@@ -220,7 +233,6 @@ async def universal_handler(event):
         # -------------------------------------------------
         # GROUP FILTER
         # -------------------------------------------------
-
         if not event.is_private and not any(t in text_lower for t in TRIGGERS):
             return
 
@@ -240,7 +252,6 @@ async def universal_handler(event):
         # -------------------------------------------------
         # LLM PIPELINE
         # -------------------------------------------------
-
         filename, history = await start_and_check(
             event,
             text,

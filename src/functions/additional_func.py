@@ -3,30 +3,35 @@ import logging
 
 from openai import OpenAI
 
-from src.utils.utils import model, sys_mess
-
+from utils.utils import model, sys_mess
 
 client = OpenAI()
 
+
 # ==============================
-# WEB SEARCH
+# WEB SEARCH (реальный интернет-поиск)
 # ==============================
 
 async def search(query: str) -> str:
+    """
+    Поиск информации для команд /search, /поиск и текстовых триггеров.
+
+    ✅ Использует реальный интернет-поиск через OpenAI Web Search.
+    ✅ Всегда отвечает по-русски.
+    ✅ Если web_search недоступен, делает аккуратный fallback на обычный ответ модели.
+    """
 
     query = (query or "").strip()
-
     if not query:
         return "❌ Пожалуйста, укажи запрос для поиска."
 
-    prompt = f"""
-{sys_mess}
-
-Сначала выполни интернет-поиск.
-Затем дай краткий и понятный ответ.
-
-Запрос пользователя: {query}
-"""
+    prompt = (
+        "Ты — внимательный ассистент сети зоомагазинов «Четыре Лапы — и не только».\n"
+        "Сначала при необходимости используй web_search, затем дай понятный, "
+        "структурированный ответ по-русски.\n"
+        "Если информация не найдена, честно скажи об этом."
+        f"\n\nЗапрос пользователя: {query}"
+    )
 
     try:
         response = client.responses.create(
@@ -76,7 +81,6 @@ async def search(query: str) -> str:
 # ==============================
 
 async def generate_image(prompt: str) -> bytes:
-
     if not prompt:
         prompt = "Домашнее животное в фирменном стиле «Четыре Лапы»"
 
@@ -99,8 +103,10 @@ async def generate_image(prompt: str) -> bytes:
 # IMAGE ANALYSIS (VISION)
 # ==============================
 
-async def analyze_image_with_gpt(image_bytes: bytes, user_prompt: str | None = None) -> str:
-
+async def analyze_image_with_gpt(
+    image_bytes: bytes,
+    user_prompt: str | None = None,
+) -> str:
     try:
         image_b64 = base64.b64encode(image_bytes).decode("utf-8")
 

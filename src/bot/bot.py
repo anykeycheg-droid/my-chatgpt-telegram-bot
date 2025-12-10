@@ -4,9 +4,8 @@ import os
 
 from dotenv import load_dotenv
 from telethon import TelegramClient
-from telethon.errors import UnauthorizedError
+from telethon.errors.rpcerrorlist import UnauthorizedError
 
-# ✅ ИМПОРТЫ БЕЗ `src.`
 from handlers.handlers import (
     universal_handler,
     help_handler,
@@ -15,62 +14,57 @@ from handlers.handlers import (
     today_handler,
     clear_handler,
 )
-
 from utils.utils import create_initial_folders
 
-
-# ======================
-# SETTINGS
-# ======================
 
 SESSION_FILE = "bot_session"
 
 
-# ======================
-# ENV LOADING
-# ======================
-
 def load_keys():
+    """
+    Загружаем ключи из окружения.
+    Ожидаем:
+      API_ID
+      API_HASH
+      BOTTOKEN
+    """
+
     load_dotenv()
 
     api_id = os.getenv("API_ID")
     api_hash = os.getenv("API_HASH")
-
-    # Унификация имени токена
-    bot_token = os.getenv("BOT_TOKEN") or os.getenv("BOTTOKEN")
+    bot_token = os.getenv("BOTTOKEN")
 
     if not api_id or not api_hash or not bot_token:
         raise RuntimeError(
-            "❌ Не заданы переменные окружения: "
-            "API_ID / API_HASH / BOT_TOKEN"
+            "❌ Не заданы переменные окружения: API_ID / API_HASH / BOTTOKEN"
         )
 
     return int(api_id), api_hash, bot_token
 
 
-# ======================
-# MAIN BOT LOOP
-# ======================
-
 async def bot() -> None:
     """
-    Safe main bot loop with reconnect logic
+    Главный цикл Telegram-бота с безопасным переподключением.
     """
 
     create_initial_folders()
 
     while True:
-        client = None
-
         try:
             api_id, api_hash, bot_token = load_keys()
 
-            client = TelegramClient(SESSION_FILE, api_id, api_hash)
+            client = TelegramClient(
+                SESSION_FILE,
+                api_id,
+                api_hash,
+            )
+
             await client.start(bot_token=bot_token)
 
-            logging.info("🐾 Ассистент сети «Четыре Лапы» успешно запущен")
+            logging.info("🐾 Ассистент сети «Четыре Лапы — и не только» запущен!")
 
-            # регистрируем handlers
+            # Регистрируем обработчики
             client.add_event_handler(help_handler)
             client.add_event_handler(search_handler)
             client.add_event_handler(img_handler)
@@ -82,15 +76,13 @@ async def bot() -> None:
 
         except UnauthorizedError:
             logging.critical(
-                "❌ Telegram Unauthorized — проверь BOT_TOKEN / API_ID / API_HASH"
+                "❌ Telegram отказал в доступе. "
+                "Проверь BOTTOKEN / API_ID / API_HASH"
             )
             break
 
-        except Exception:
-            logging.exception("⚠ Критическая ошибка в цикле бота")
+        except Exception as e:
+            logging.exception(
+                f"⚠ Критическая ошибка bot loop: {e}"
+            )
             await asyncio.sleep(10)
-
-        finally:
-            if client:
-                await client.disconnect()
-                logging.info("🔌 Telegram client disconnected — reconnect")

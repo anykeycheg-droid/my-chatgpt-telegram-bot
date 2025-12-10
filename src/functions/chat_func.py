@@ -6,7 +6,7 @@ from typing import List, Tuple
 from openai import OpenAI
 from telethon.events import NewMessage
 
-from src.utils.utils import (
+from utils.utils import (
     model,
     max_token,
     read_existing_conversation,
@@ -34,16 +34,19 @@ RESPONSE_MAX_TOKENS = 1500
 
 def trim_prompt_window(prompt: Prompt) -> Prompt:
     """
-    Сохраняет SYSTEM сообщения и последние WINDOW_SIZE сообщений диалога.
+    Оставляет только последние WINDOW_SIZE сообщений в prompt
+    + сохраняет все system-сообщения
     """
 
     system_msgs = [m for m in prompt if m["role"] == "system"]
     dialog_msgs = [m for m in prompt if m["role"] != "system"]
 
     if len(dialog_msgs) <= WINDOW_SIZE:
-        return system_msgs + dialog_msgs
+        return prompt
 
-    return system_msgs + dialog_msgs[-WINDOW_SIZE:]
+    dialog_msgs = dialog_msgs[-WINDOW_SIZE:]
+
+    return system_msgs + dialog_msgs
 
 
 def should_keep_message(text: str) -> bool:
@@ -51,12 +54,18 @@ def should_keep_message(text: str) -> bool:
         return False
 
     trash = {
-        "ок", "ага", "понял", "поняла",
-        "спасибо", "окей", "хорошо", "ясно",
+        "ок",
+        "ага",
+        "понял",
+        "поняла",
+        "спасибо",
+        "окей",
+        "хорошо",
+        "ясно",
     }
 
     t = text.lower().strip()
-    if t in trash or len(t) < 3:
+    if t in trash:
         return False
 
     return True
@@ -109,7 +118,7 @@ async def create_summary_and_reset(prompt: Prompt, filename: str):
                 "content":
                     "Ты сжимаешь диалоги. "
                     "Создай краткое резюме беседы в 3–5 предложениях "
-                    "по-русски, только по ключевым фактам."
+                    "по-русски, только по ключевым фактам.",
             },
             {
                 "role": "user",
