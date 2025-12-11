@@ -13,6 +13,8 @@ from utils.utils import (
     read_existing_conversation,
     num_tokens_from_messages,
     sys_mess,
+    save_session,  # ← ЭТО НУЖНО ДОБАВИТЬ
+
 )
 
 from functions.additional_func import search as web_search
