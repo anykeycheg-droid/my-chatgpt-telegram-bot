@@ -48,8 +48,12 @@ FILE_REQUEST_WORDS = {
     "pdf",
 }
 
-
 BASE_PROJECT_DIR = Path(__file__).resolve().parents[2]
+
+RAG_WARNING_TEXT = (
+    "⚠️ Не смог получить доступ к базе знаний, но продолжаю отвечать как ассистент."
+)
+RAG_WARNING_PENDING = False  # выставляется при фатальной ошибке RAG
 
 
 # ===============================================================
@@ -167,6 +171,14 @@ def _build_sources_hint(sources: List[Dict[str, Any]]) -> str:
 
 
 def try_rag(query: str) -> Optional[Dict[str, Any]]:
+    """
+    Обёртка над rag_search:
+    - при успехе возвращает форматированный текст и список источников;
+    - при ошибке RAG ставит флаг RAG_WARNING_PENDING и возвращает None,
+      чтобы бот аккуратно продолжил без внутренней базы.
+    """
+    global RAG_WARNING_PENDING
+
     try:
         chunks = rag_search(query)
 
@@ -184,6 +196,8 @@ def try_rag(query: str) -> Optional[Dict[str, Any]]:
 
     except Exception:
         logging.exception("RAG SEARCH ERROR")
+        # помечаем, что нужно предупредить пользователя в ближайшем ответе
+        RAG_WARNING_PENDING = True
         return None
 
 
@@ -191,7 +205,18 @@ def try_rag(query: str) -> Optional[Dict[str, Any]]:
 # CHAT
 # ===============================================================
 
-async def start_and_check(event: NewMessage, message: str, chat_id: int):
+async def start_and_check(
+    event: NewMessage,
+    message: str,
+    chat_id: int,
+) -> Tuple[dict, str, Prompt]:
+    """
+    Обрабатывает входящее сообщение:
+    - подготавливает prompt
+    - выполняет RAG-поиск
+    - обрабатывает запрос документов
+    Возвращает: (session, filename, prompt)
+    """
 
     session, filename, prompt = read_existing_conversation(str(chat_id))
 
@@ -209,10 +234,13 @@ async def start_and_check(event: NewMessage, message: str, chat_id: int):
         sources = session.get("last_rag_sources", [])
 
         if not sources:
-            return filename, [
+            return session, filename, [
                 {
                     "role": "assistant",
-                    "content": "У меня ещё нет контекста, из какого документа отправлять файл. Задайте вопрос сначала.",
+                    "content": (
+                        "У меня ещё нет контекста, из какого документа отправлять файл. "
+                        "Сначала задайте вопрос, чтобы я смог найти нужную инструкцию."
+                    ),
                 }
             ]
 
@@ -227,7 +255,7 @@ async def start_and_check(event: NewMessage, message: str, chat_id: int):
                 attachments.append(full_path)
 
         if not attachments:
-            return filename, [
+            return session, filename, [
                 {
                     "role": "assistant",
                     "content": "Не удалось найти файлы документов на сервере.",
@@ -242,8 +270,8 @@ async def start_and_check(event: NewMessage, message: str, chat_id: int):
                 caption=f"Источник: {f.name}",
             )
 
-        return filename, []
-
+        # отдельного ответа от модели не требуется
+        return session, filename, []
 
     # ===================================================
     # NORMAL QUESTION
@@ -276,10 +304,12 @@ async def start_and_check(event: NewMessage, message: str, chat_id: int):
                 f"{sources_hint}"
             )
 
+        # Вставляем RAG-контекст сразу после основного системного промта
         prompt.insert(1, {"role": "system", "content": system_content})
         prompt.append({"role": "user", "content": text})
 
     else:
+        # В RAG ничего не нашли (или он недоступен) — переходим к интернет-поиску по подтверждению
         session["state"] = WAIT_WEB_CONFIRM_STATE
         session["last_rag_query"] = text
 
@@ -294,7 +324,7 @@ async def start_and_check(event: NewMessage, message: str, chat_id: int):
         )
 
         save_session(filename, session, prompt)
-        return filename, prompt
+        return session, filename, prompt
 
     prompt = trim_prompt_window(prompt)
 
@@ -309,7 +339,7 @@ async def start_and_check(event: NewMessage, message: str, chat_id: int):
 
         prompt.append({"role": "user", "content": text})
 
-    return filename, prompt
+    return session, filename, prompt
 
 
 # ===============================================================
@@ -349,7 +379,7 @@ async def create_summary_and_reset(prompt: Prompt, filename: str):
 
 
 # ===============================================================
-# SAVE
+# SAVE + OPENAI RESPONSE + SENDER
 # ===============================================================
 
 def save_session(filename: str, session: dict, prompt: Prompt):
@@ -366,3 +396,76 @@ def save_session(filename: str, session: dict, prompt: Prompt):
             )
     except Exception as e:
         logging.error(f"SAVE SESSION ERROR: {e}")
+
+
+async def get_openai_response(
+    session: dict,
+    prompt: Prompt,
+    filename: str,
+) -> str:
+    """
+    Отправляет prompt в модель и возвращает текст ответа.
+    При необходимости добавляет предупреждение про недоступный RAG.
+    """
+
+    global RAG_WARNING_PENDING
+
+    if not prompt:
+        return "Пожалуйста, уточните ваш вопрос."
+
+    prompt = trim_prompt_window(prompt)
+
+    try:
+        completion = client.chat.completions.create(
+            model=model,
+            messages=prompt,
+            max_tokens=RESPONSE_MAX_TOKENS,
+            temperature=0.3,
+        )
+
+        answer = (completion.choices[0].message.content or "").strip()
+
+    except Exception as e:
+        logging.exception("OPENAI CHAT ERROR")
+        answer = f"⚠️ Ошибка при обращении к языковой модели: {e}"
+
+    # Если RAG отвалился — один раз предупредим пользователя
+    if RAG_WARNING_PENDING:
+        answer = f"{RAG_WARNING_TEXT}\n\n{answer}"
+        RAG_WARNING_PENDING = False
+
+    # Добавляем ответ в историю и сохраняем сессии
+    prompt.append({"role": "assistant", "content": answer})
+    save_session(filename, session, prompt)
+
+    return answer
+
+
+async def process_and_send_mess(event: NewMessage, answer: Any):
+    """
+    Унифицированная отправка ответа в Telegram.
+    Принимает строку или произвольный объект и отправляет пользователю.
+    """
+
+    if isinstance(answer, list):
+        # попробуем найти последнее сообщение ассистента
+        content = None
+        for m in reversed(answer):
+            if isinstance(m, dict) and m.get("role") == "assistant":
+                content = m.get("content")
+                break
+        if content is None:
+            content = str(answer[-1]) if answer else ""
+        text = content
+    elif isinstance(answer, dict) and "content" in answer:
+        text = str(answer["content"])
+    else:
+        text = str(answer)
+
+    text = text or "Пустой ответ."
+
+    try:
+        await event.respond(text, link_preview=False)
+    except Exception:
+        logging.exception("TELEGRAM SEND ERROR")
+        await event.reply(text)

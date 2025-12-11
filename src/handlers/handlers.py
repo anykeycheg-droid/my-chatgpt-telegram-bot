@@ -118,6 +118,7 @@ async def search_handler(event):
 
 @events.register(events.NewMessage(pattern=r"/clear"))
 async def clear_handler(event):
+    # просто сбрасываем историю; результат нам не нужен
     await start_and_check(event, "Очистка истории", event.chat_id)
     await process_and_send_mess(event, "🗑 История диалога очищена!")
     raise events.StopPropagation
@@ -289,13 +290,13 @@ async def universal_handler(event):
         except Exception:
             logging.debug("Typing indicator failed")
 
-        filename, history = await start_and_check(
+        session, filename, history = await start_and_check(
             event,
             text,
             event.chat_id,
         )
 
-        answer = await get_openai_response(history, filename)
+        answer = await get_openai_response(session, history, filename)
 
         await process_and_send_mess(event, answer)
 
