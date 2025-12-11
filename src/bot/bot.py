@@ -43,46 +43,39 @@ def load_keys():
     return int(api_id), api_hash, bot_token
 
 
-async def bot() -> None:
+# Загружаем ключи один раз при старте
+api_id, api_hash, bot_token = load_keys()
+
+# Создаём клиент глобально
+client = TelegramClient(
+    SESSION_FILE,
+    api_id,
+    api_hash,
+)
+
+
+async def start_bot() -> None:
     """
-    Главный цикл Telegram-бота с безопасным переподключением.
+    Асинхронный запуск Telegram-клиента.
+    НИЧЕГО не блокирует — блокировка будет в main.py
     """
 
     create_initial_folders()
 
-    while True:
-        try:
-            api_id, api_hash, bot_token = load_keys()
+    try:
+        await client.start(bot_token=bot_token)
+    except UnauthorizedError:
+        logging.critical(
+            "❌ Telegram отказал в доступе. Проверь BOTTOKEN / API_ID / API_HASH"
+        )
+        raise
 
-            client = TelegramClient(
-                SESSION_FILE,
-                api_id,
-                api_hash,
-            )
+    logging.info("🐾 Ассистент сети «Четыре Лапы — и не только» запущен!")
 
-            await client.start(bot_token=bot_token)
-
-            logging.info("🐾 Ассистент сети «Четыре Лапы — и не только» запущен!")
-
-            # Регистрируем обработчики
-            client.add_event_handler(help_handler)
-            client.add_event_handler(search_handler)
-            client.add_event_handler(img_handler)
-            client.add_event_handler(today_handler)
-            client.add_event_handler(clear_handler)
-            client.add_event_handler(universal_handler)
-
-            await client.run_until_disconnected()
-
-        except UnauthorizedError:
-            logging.critical(
-                "❌ Telegram отказал в доступе. "
-                "Проверь BOTTOKEN / API_ID / API_HASH"
-            )
-            break
-
-        except Exception as e:
-            logging.exception(
-                f"⚠ Критическая ошибка bot loop: {e}"
-            )
-            await asyncio.sleep(10)
+    # Регистрируем обработчики
+    client.add_event_handler(help_handler)
+    client.add_event_handler(search_handler)
+    client.add_event_handler(img_handler)
+    client.add_event_handler(today_handler)
+    client.add_event_handler(clear_handler)
+    client.add_event_handler(universal_handler)

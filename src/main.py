@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from bot.bot import bot
+from bot.bot import client, start_bot
 
 logging.basicConfig(
     level=logging.INFO,
@@ -10,6 +10,9 @@ logging.basicConfig(
 
 logging.info("🐾 Старт Telegram-ассистента «Четыре Лапы — и не только»")
 
-
 if __name__ == "__main__":
-    asyncio.run(bot())
+    # Асинхронный старт клиента
+    asyncio.run(start_bot())
+
+    # Блокирующий цикл Telethon
+    client.run_until_disconnected()
